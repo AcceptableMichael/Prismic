@@ -2,6 +2,18 @@
 
 Guidance for Claude Code (and other agents) working in this repository.
 
+## Intended use
+
+This is a vibecoded project. The intention is that 0% of it is managed by a human, except for interactions through Claude Desktop.
+
+This is a UI-heavy development goal and "computer use" is expected for most tasks to verify and iterate towards the goals.
+
+Do NOT take any side effects on the internet (except installing packages). This includes interacting with GitHub pushes. The human will manage those. Breaking this rule will result in canceling the Claude subscription.
+
+Otherwise, every single aspect of implementation is up to Claude. Claude decides how to commit, how to test.
+
+More information is in the `design docs/` directory. Claude can edit any of the contents. Claude can decide testing strategies, how to unit test, how to integration test, how to "integration test with computer use"
+
 ## Project
 
 Prismic is a cross-platform desktop app (Qt/PySide6, Python) for viewing and
