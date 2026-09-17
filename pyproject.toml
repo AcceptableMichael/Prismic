@@ -39,6 +39,11 @@ mypy_path = "src"
 packages = ["prismic"]
 strict = true
 
+[[tool.mypy.overrides]]
+# pytest-qt's QtBot ships without type stubs, so its methods look untyped to mypy.
+module = "tests.*"
+disallow_untyped_calls = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
