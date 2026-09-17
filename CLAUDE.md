@@ -12,4 +12,8 @@ Project documentation lives in `development documents/`, split by ownership:
 
 @development documents/owned by human/intended use.md
 
+@development documents/owned by human/development flow.md
+
+@development documents/owned by human/testing flow.md
+
 @development documents/owned by claude/project guidance.md
