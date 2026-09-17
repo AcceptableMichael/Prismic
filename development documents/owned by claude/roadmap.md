@@ -27,16 +27,14 @@ arriving once there's application-layer behavior worth showing.
       Media/Tag/Collection domain types, SQLite schema, migrations,
       repositories, and the single-file `.prismic` collection lifecycle
       (see [`requirements-amendments.md`](requirements-amendments.md)).
-- [ ] **Phase 2 — [Indexing & reconciliation](phases/02-indexing-and-reconciliation.md)**
+- [x] **Phase 2 — [Indexing & reconciliation](phases/02-indexing-and-reconciliation.md)**
       Filesystem scanning, content hashing, and move/change/missing
-      reconciliation against persisted media identity. All logic and its
-      tests are done; the two remaining sub-goals (actually running on a
-      background thread, and wiring into collection-open) are deliberately
-      deferred until Phase 3's worker pool exists to dispatch onto.
-- [ ] **Phase 3 — [Application layer](phases/03-application-layer.md)**
+      reconciliation against persisted media identity.
+- [x] **Phase 3 — [Application layer](phases/03-application-layer.md)**
       `PrismicSession`, the command dispatcher, tag/mapping/filter commands,
       undo history, and the query layer (intersection filtering, ordering,
-      selection invariants).
+      selection invariants). Also closes out Phase 2's background-execution
+      items via a new `WorkerPool`.
 - [ ] **Phase 4 — [Media layer](phases/04-media-layer.md)**
       Supported-format definition, image/video loading, bounded caching,
       downsampling, and stale-result suppression, backed by test fixtures.

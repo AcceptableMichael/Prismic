@@ -17,9 +17,13 @@ Migration = Callable[[sqlite3.Connection], None]
 
 
 _SCHEMA_V1_STATEMENTS = (
+    # AUTOINCREMENT (not just INTEGER PRIMARY KEY) so ids are never reused
+    # after a delete — move detection and undo/redo both key off of media
+    # and tag ids, and a reused id could silently reattach history to the
+    # wrong identity.
     """
     CREATE TABLE media (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         content_hash TEXT NOT NULL,
         relative_path TEXT NOT NULL,
         size INTEGER NOT NULL,
@@ -29,7 +33,7 @@ _SCHEMA_V1_STATEMENTS = (
     """,
     """
     CREATE TABLE tags (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE
     )
     """,

@@ -19,6 +19,7 @@ matching one file) is just as unsafe to guess at, so it's held to the same
 from __future__ import annotations
 
 import sqlite3
+import threading
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -63,19 +64,30 @@ class Reconciler:
     applies its results if that generation is still the current one — if a
     newer scan has since begun, the call is a stale no-op rather than
     mutating state out of order.
+
+    Deliberately holds no connection of its own: per overview section 7,
+    "SQLite connections are explicitly owned by their respective execution
+    contexts rather than shared indiscriminately across threads." A
+    reconciliation run on a background worker thread must use its own
+    connection to the same `.prismic` file, not the session's main-thread
+    connection — so `reconcile()` takes the connection to use per call.
+    `begin_scan()`/`reconcile()` are safe to call from any thread; the
+    generation counter and the reconcile-and-commit sequence are both
+    guarded by an internal lock so overlapping calls can't interleave.
     """
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
-        self._connection = connection
-        self._media_repository = MediaRepository(connection)
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._generation = 0
 
     def begin_scan(self) -> int:
-        self._generation += 1
-        return self._generation
+        with self._lock:
+            self._generation += 1
+            return self._generation
 
     def reconcile(
         self,
+        connection: sqlite3.Connection,
         generation: int,
         hashed_files: Iterable[HashedFile],
         *,
@@ -88,14 +100,25 @@ class Reconciler:
         state, if any, is left completely untouched this pass rather than
         being marked missing just because it couldn't be re-verified.
         """
+        with self._lock:
+            return self._reconcile_locked(connection, generation, hashed_files, unreadable_paths)
+
+    def _reconcile_locked(
+        self,
+        connection: sqlite3.Connection,
+        generation: int,
+        hashed_files: Iterable[HashedFile],
+        unreadable_paths: frozenset[str],
+    ) -> ReconciliationResult:
         if generation != self._generation:
             return ReconciliationResult(applied=False)
 
+        media_repository = MediaRepository(connection)
         hashed_files = list(hashed_files)
-        existing = self._media_repository.list_all()
+        existing = media_repository.list_all()
         existing_by_path = {m.relative_path: m for m in existing if m.state == MediaState.ACTIVE}
 
-        self._connection.execute("BEGIN")
+        connection.execute("BEGIN")
         try:
             new_count = 0
             unchanged_count = 0
@@ -109,8 +132,8 @@ class Reconciler:
                 elif existing_media.content_hash == file.content_hash:
                     unchanged_count += 1
                 else:
-                    self._mark_missing(existing_media)
-                    self._media_repository.create(
+                    self._mark_missing(media_repository, existing_media)
+                    media_repository.create(
                         relative_path=file.relative_path,
                         content_hash=file.content_hash,
                         size=file.size,
@@ -144,7 +167,7 @@ class Reconciler:
                 if len(candidates) == 1 and len(files) == 1:
                     media = candidates[0]
                     file = files[0]
-                    self._media_repository.update(
+                    media_repository.update(
                         media.id,
                         relative_path=file.relative_path,
                         content_hash=file.content_hash,
@@ -156,7 +179,7 @@ class Reconciler:
                     moved_count += 1
                 else:
                     for file in files:
-                        self._media_repository.create(
+                        media_repository.create(
                             relative_path=file.relative_path,
                             content_hash=file.content_hash,
                             size=file.size,
@@ -171,13 +194,13 @@ class Reconciler:
                     continue
                 if media.relative_path in unreadable_paths:
                     continue
-                self._mark_missing(media)
+                self._mark_missing(media_repository, media)
                 missing_count += 1
         except Exception:
-            self._connection.execute("ROLLBACK")
+            connection.execute("ROLLBACK")
             raise
         else:
-            self._connection.execute("COMMIT")
+            connection.execute("COMMIT")
 
         return ReconciliationResult(
             applied=True,
@@ -188,10 +211,11 @@ class Reconciler:
             missing_count=missing_count,
         )
 
-    def _mark_missing(self, media: Media) -> None:
+    @staticmethod
+    def _mark_missing(media_repository: MediaRepository, media: Media) -> None:
         if media.state == MediaState.MISSING:
             return
-        self._media_repository.update(
+        media_repository.update(
             media.id,
             relative_path=media.relative_path,
             content_hash=media.content_hash,
@@ -202,13 +226,17 @@ class Reconciler:
 
 
 def run_reconciliation(
-    reconciler: Reconciler, collection: Collection, generation: int
+    reconciler: Reconciler,
+    collection: Collection,
+    generation: int,
+    connection: sqlite3.Connection,
 ) -> ReconciliationResult:
     """Scan `collection.root`, hash each candidate, and reconcile the result.
 
-    Glue between the scanner, hashing, and the reconciler. A future
-    background worker (Phase 3's worker pool) dispatches this off the GUI
-    thread rather than calling it inline.
+    Glue between the scanner, hashing, and the reconciler. `connection`
+    should be a connection owned by whichever thread calls this — Phase 3's
+    worker pool opens its own when dispatching this off the GUI thread,
+    never reusing the session's main-thread connection.
     """
     hashed_files: list[HashedFile] = []
     unreadable_paths: set[str] = set()
@@ -229,5 +257,5 @@ def run_reconciliation(
         )
 
     return reconciler.reconcile(
-        generation, hashed_files, unreadable_paths=frozenset(unreadable_paths)
+        connection, generation, hashed_files, unreadable_paths=frozenset(unreadable_paths)
     )

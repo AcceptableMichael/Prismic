@@ -78,17 +78,18 @@ files, so both are treated as ambiguous.
       — a `reconcile()` call for a generation that's no longer current is a
       no-op (`ReconciliationResult(applied=False)`), verified with a test
       that starts a second scan before "finishing" the first
-- [ ] Scans and hashing run off the GUI thread; GUI stays usable throughout
-      — not yet meaningful to check off: there's no GUI event loop driving
-      this yet (Phase 5), and no worker pool to dispatch onto (Phase 3).
-      Everything here is written to be safely callable from a background
-      thread (no Qt imports, no shared mutable state beyond the `Reconciler`
-      instance itself, which a single worker will own) — actually running
-      it off-thread is Phase 3/5's wiring job.
-- [ ] Initial scan-and-hash on collection open runs in the background per
-      the lifecycle in Phase 1 — deferred for the same reason: there's no
-      worker pool yet to run it on. `indexing.reconciler.run_reconciliation`
-      is the entry point Phase 3 should call from that worker.
+- [x] Scans and hashing run off the GUI thread — closed in Phase 3:
+      `PrismicSession` dispatches `run_reconciliation` onto a background
+      `WorkerPool`. "GUI stays usable throughout" isn't independently
+      verifiable until Phase 5 has an actual GUI event loop, but the
+      dispatch mechanism itself is in place and tested
+      (`tests/integration/test_session.py`). This required reshaping
+      `Reconciler` to take a connection per call instead of owning one, so
+      the background thread never touches the session's main-thread
+      connection (see Phase 3's file).
+- [x] Initial scan-and-hash on collection open runs in the background —
+      `PrismicSession.__init__` kicks it off via `_scan_in_background()`,
+      exposed as `session.initial_reconciliation` (a `Future`)
 
 ## Tests (`tests/unit/indexing`, `tests/integration`)
 
@@ -104,3 +105,13 @@ files, so both are treated as ambiguous.
       real NTFS junction created via `mklink /J`, which doesn't require
       elevated privileges)
 - [x] Stale scan result correctly discarded
+
+## Changelog
+
+**Phase 3:** `Reconciler.__init__` no longer takes a connection, and
+`reconcile()`/`run_reconciliation()` now take one per call — needed so a
+background worker thread can supply its own connection to the `.prismic`
+file rather than reusing the session's main-thread connection (overview
+section 7). The generation counter and reconcile-and-commit sequence are
+now guarded by an internal lock, since calls can come from any thread.
+Existing tests were updated for the new signature; behavior is unchanged.
