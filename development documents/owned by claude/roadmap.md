@@ -23,7 +23,7 @@ arriving once there's application-layer behavior worth showing.
       Toolchain, project skeleton, CI-free local dev loop, and the
       computer-use verification workflow. Mostly done already; this file
       mainly records what's in place and what's still owed.
-- [ ] **Phase 1 — [Domain & persistence](phases/01-domain-and-persistence.md)**
+- [x] **Phase 1 — [Domain & persistence](phases/01-domain-and-persistence.md)**
       Media/Tag/Collection domain types, SQLite schema, migrations,
       repositories, and the single-file `.prismic` collection lifecycle
       (see [`requirements-amendments.md`](requirements-amendments.md)).
