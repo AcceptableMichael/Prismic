@@ -3,7 +3,7 @@
 A cross-platform desktop application for viewing and organizing image and video
 collections using user-defined tags.
 
-See [`design docs/initial technical overview.md`](design%20docs/initial%20technical%20overview.md)
+See [`development documents/owned by human/initial technical overview.md`](development%20documents/owned%20by%20human/initial%20technical%20overview.md)
 for the full feature requirements and architecture.
 
 ## Development setup
