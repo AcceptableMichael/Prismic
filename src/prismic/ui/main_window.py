@@ -41,8 +41,9 @@ from prismic.application.queries.media_query import eligible_media
 from prismic.application.session import PrismicSession
 from prismic.domain.tag import Tag
 from prismic.indexing.reconciler import ReconciliationResult
-from prismic.persistence.errors import PersistenceError
+from prismic.persistence.errors import CollectionLockedError, PersistenceError
 from prismic.ui.future_watcher import FutureWatcher
+from prismic.ui.instance_bridge import InstanceBridge, request_focus
 from prismic.ui.keyboard import KeyboardController
 from prismic.ui.result_model import MediaIdRole, ResultListModel
 from prismic.ui.tag_panel import TagPanel
@@ -58,6 +59,7 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
         self.session: PrismicSession | None = None
         self._future_watchers: list[FutureWatcher] = []
+        self._instance_bridge: InstanceBridge | None = None
 
         self._build_ui()
         self._build_menu()
@@ -97,7 +99,7 @@ class MainWindow(QMainWindow):
             # has taken effect, so the window is visibly there first and
             # any error dialog reads as "this window couldn't open X"
             # rather than appearing to come from nowhere.
-            QTimer.singleShot(0, lambda: self.open_collection(initial_path))
+            QTimer.singleShot(0, lambda: self.open_collection(initial_path, is_startup=True))
 
     def _build_ui(self) -> None:
         self._placeholder = QLabel("No collection open")
@@ -158,23 +160,65 @@ class MainWindow(QMainWindow):
         if file_path:
             self.open_collection(Path(file_path))
 
-    def open_collection(self, path: Path) -> None:
+    def open_collection(self, path: Path, *, is_startup: bool = False) -> None:
         if self.session is not None:
             self.session.close()
             self.session = None
+        if self._instance_bridge is not None:
+            self._instance_bridge.release()
+            self._instance_bridge = None
 
         try:
             session = PrismicSession.open(path)
+        except CollectionLockedError as exc:
+            # The file lock is authoritative; this is just a best-effort
+            # nicety on top of it. If another running instance is
+            # reachable, ask it to raise itself instead of showing a plain
+            # error -- and if this attempt was the CLI startup launch (the
+            # OS double-click case), there's nothing else for this second
+            # process to do, so it quits rather than leaving an empty
+            # window behind.
+            if request_focus(exc.path):
+                if is_startup:
+                    self.close()
+                    return
+                self.statusBar().showMessage(
+                    "That collection is already open — brought its window to the front.",
+                    5000,
+                )
+            else:
+                QMessageBox.critical(self, "Could not open collection", str(exc))
+            self._central_stack.setCurrentWidget(self._placeholder)
+            return
         except PersistenceError as exc:
             QMessageBox.critical(self, "Could not open collection", str(exc))
             self._central_stack.setCurrentWidget(self._placeholder)
             return
 
         self.session = session
+        self._instance_bridge = InstanceBridge(self)
+        self._instance_bridge.raise_requested.connect(self._on_raise_requested)
+        self._instance_bridge.take_ownership(session.collection.database_path)
         self.setWindowTitle(f"Prismic — {session.collection.root.name}")
         self._central_stack.setCurrentWidget(self._splitter)
         self._watch_reconciliation(session.initial_reconciliation)
         self._refresh_all()
+
+    def _on_raise_requested(self) -> None:
+        self.setWindowState(
+            (self.windowState() & ~Qt.WindowState.WindowMinimized) | Qt.WindowState.WindowActive
+        )
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        # Belt and braces: OS-level focus-stealing prevention (the same
+        # mechanism documented in project guidance.md for this app's own
+        # window at launch) can silently deny activateWindow() when this
+        # process isn't already the foreground one -- observed live, not
+        # just theorized. QApplication.alert() is the OS-sanctioned "ask
+        # for attention" request (taskbar flash on Windows, dock bounce on
+        # macOS) that works even when activation itself is denied.
+        QApplication.alert(self)
 
     def _rescan(self) -> None:
         if self.session is None:
@@ -196,6 +240,9 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
+        if self._instance_bridge is not None:
+            self._instance_bridge.release()
+            self._instance_bridge = None
         if self.session is not None:
             self.session.close()
             self.session = None

@@ -106,12 +106,49 @@ window couldn't open X." Two new regression tests in
 (`session is None` immediately after construction, only becoming non-None
 after pumping the event loop).
 
+## Addendum: focus-forwarding instead of an error (post-phase, user-requested)
+
+After this phase shipped, the user hit the locked-collection dialog by
+launching a second instance against a collection they already had open,
+and asked for better behavior — specifically, whether opening the same
+collection twice could just work. It deliberately still can't (the
+single-writer-per-collection rule is load-bearing: see overview section 6
+and the reasoning in Phase 1), but the user picked a middle path over
+AskUserQuestion: **the second launch now focuses the already-open window
+instead of erroring**, rather than either allowing real concurrent access
+or just prettifying the error text.
+
+`ui/instance_bridge.py` adds a `QLocalServer`/`QLocalSocket`-based IPC
+channel, keyed by a hash of the collection's database path, layered
+*on top of* the Phase 1 file lock (which stays authoritative — the socket
+is a best-effort nicety, not a second source of truth). When
+`MainWindow.open_collection()` hits `CollectionLockedError`, it now tries
+`request_focus()` first; only if that fails (no live listener reachable)
+does it fall back to the `QMessageBox`. A CLI/double-click launch
+(`is_startup=True`) that successfully focuses another instance just closes
+itself instead of leaving an empty window behind.
+
+**Real finding from live verification, not just theorized:** asking the
+existing window to `activateWindow()` from a background process can be
+silently denied by Windows' own focus-stealing prevention — the same
+mechanism already documented above this section for this app's own launch
+sequence. `QApplication.alert(self)` (the OS-sanctioned "ask for
+attention" request — taskbar flash on Windows, dock bounce on macOS) is
+added as a fallback that works even when full activation is denied.
+
+Verified live end-to-end: launching a second instance against an
+already-open collection with the fix in place left **no** duplicate
+window and **no** error dialog — only the original instance remained
+running. Four new tests in `tests/gui/test_instance_bridge.py` cover the
+signal delivery and both the manual-open and startup-launch cases.
+
 ## Tests
 
 - [x] `tests/integration/test_end_to_end.py`, `test_large_collection.py`,
       `test_locking.py`, `test_mid_scan_failures.py`; `tests/gui/test_failure_handling.py`,
-      `test_responsiveness.py`; plus two new regression tests in
-      `tests/gui/test_main_window.py` for the deferred-open fix
+      `test_responsiveness.py`, `test_instance_bridge.py`; plus two new
+      regression tests in `tests/gui/test_main_window.py` for the
+      deferred-open fix
 - [x] What's realistically only verifiable by hand, documented rather than
       silently skipped: true OS-level double-click launch (needs Phase 7's
       file association); real perceived responsiveness/frame timing on an
