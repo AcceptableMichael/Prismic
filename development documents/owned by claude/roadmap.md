@@ -35,9 +35,12 @@ arriving once there's application-layer behavior worth showing.
       undo history, and the query layer (intersection filtering, ordering,
       selection invariants). Also closes out Phase 2's background-execution
       items via a new `WorkerPool`.
-- [ ] **Phase 4 — [Media layer](phases/04-media-layer.md)**
+- [x] **Phase 4 — [Media layer](phases/04-media-layer.md)**
       Supported-format definition, image/video loading, bounded caching,
       downsampling, and stale-result suppression, backed by test fixtures.
+      Surfaced a real environment gotcha: Qt Multimedia's default backend
+      choice determines whether WebM actually plays at all — see the phase
+      file.
 - [ ] **Phase 5 — [UI & viewer](phases/05-ui-and-viewer.md)**
       Real main window wired to the application layer: tag list, filter
       selection, result view, media viewer (zoom/pan/playback), and the

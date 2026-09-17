@@ -20,6 +20,7 @@ packages = ["src/prismic"]
 
 [dependency-groups]
 dev = [
+    "imageio-ffmpeg>=0.6.0",
     "mypy>=1.11",
     "pytest>=8.3",
     "pytest-qt>=4.4",
@@ -43,6 +44,11 @@ strict = true
 # pytest-qt's QtBot ships without type stubs, so its methods look untyped to mypy.
 module = "tests.*"
 disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+# Dev-only fixture-generation dependency; ships no type stubs.
+module = "imageio_ffmpeg"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
