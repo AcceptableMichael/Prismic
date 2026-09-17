@@ -79,34 +79,45 @@ Unless told otherwise, when given a goal:
    if the loop gets interrupted, the history should show real progress.
 6. Summarize what changed and how you verified it when you report back.
 
-## 2026-09-16: computer-use investigation — mostly self-inflicted
+## 2026-09-16: computer-use + this app's window — root cause found
 
 While scaffolding `tests/gui/`, a Claude session couldn't get computer-use
-to show the running `prismic` window and spent a long time on Win32-level
-diagnostics (`ShowWindow`/`GetWindowRect`/`IsIconic` via PowerShell),
-building a theory about an environment-level guard that silently
-re-minimizes unrecognized windows. The user later reported watching the app
-open and then disappear — and the real cause turned out to be much simpler:
-that session ran `taskkill //F //IM prismic.exe` / `//IM python.exe` as
-"cleanup" partway through, which kills every process with that image name
-system-wide, including the user's own just-launched instance. See
-[[feedback-no-blanket-taskkill]] in Claude's memory.
+to show the running `prismic` window. Two separate things were going on,
+now both resolved:
 
-Net takeaway for future sessions:
+1. **Self-inflicted, first.** The session ran
+   `taskkill //F //IM prismic.exe` / `//IM python.exe` as "cleanup"
+   partway through, which kills every process with that image name
+   system-wide — including the user's own just-launched instance. See
+   [[feedback-no-blanket-taskkill]] in Claude's memory. Never do this;
+   only kill a specific PID you personally spawned and can positively
+   identify as orphaned.
+2. **A genuine, reproducible timing issue, second.** Launching `prismic`
+   via computer-use's own `open_application` (or presumably a normal
+   double-click) starts the window unfocused, and it auto-minimizes
+   within roughly 1-2 seconds if it never receives real foreground focus
+   — likely a focus-stealing-prevention behavior in this environment.
+   Because a computer-use tool round trip (launch, then a separate
+   screenshot call) always takes longer than that window, every attempt
+   to launch-then-screenshot via computer-use alone landed after the
+   auto-minimize already happened, making it look like the window never
+   rendered at all.
 
-- **Never `taskkill`/kill a GUI process by image name.** Only kill a
-  specific PID you personally spawned and can positively identify as
-  orphaned. If the user says they launched an instance, it's theirs — leave
-  it running unless asked to close it.
-- Whether there's *also* a genuine environment quirk around computer-use
-  and this app's window (separate from the taskkill mistake) is still
-  unconfirmed — the diagnostic trail was contaminated by the taskkill, so
-  don't trust the earlier "re-minimizing guard" theory as established fact.
-  If computer-use still can't see the window after avoiding any
-  process-killing, it's worth investigating fresh rather than assuming the
-  old theory applies.
-- `tests/gui/` (pytest-qt) remains the reliable, always-available layer for
-  behavioral/state correctness regardless of how the computer-use question
-  shakes out. It doesn't verify actual on-screen rendering/visibility
-  though — that gap still needs a human or a real screenshot when
-  pixel-level confirmation genuinely matters.
+**The fix that works:** launch the app via a native script that doesn't
+depend on a second cross-tool round trip — e.g. from PowerShell,
+`Start-Process -FilePath "uv" -ArgumentList "run","prismic" -WindowStyle Normal`
+— and then take the computer-use screenshot right away. In practice this
+launch path reliably stays visible/non-minimized well past the auto-hide
+threshold that `open_application` hits, and the window shows up and is
+fully interactable (click, type, verify) via the normal
+`mcp__computer-use__*` tools. Verified working end-to-end: typed into the
+keycap input, saw the keycap boxes render, clicked "Confirm here", saw the
+background randomize, closed via the window's own close button.
+
+Takeaway for future sessions: prefer `Start-Process ... -WindowStyle Normal`
+(or an equivalent native launch) over `open_application` when you need
+computer-use to actually see this app's window. `tests/gui/` (pytest-qt)
+remains the reliable, always-available layer for behavioral/state
+correctness regardless — it doesn't verify actual on-screen
+rendering/visibility, so use computer-use (via the launch path above) when
+pixel-level confirmation genuinely matters.
