@@ -79,31 +79,34 @@ Unless told otherwise, when given a goal:
    if the loop gets interrupted, the history should show real progress.
 6. Summarize what changed and how you verified it when you report back.
 
-## Known limitation: computer-use can't reliably see this app's window
+## 2026-09-16: computer-use investigation — mostly self-inflicted
 
-As of 2026-09-16, launching `prismic` (via `uv run prismic`, the desktop
-shortcut, or `open_application`) and then trying to view/interact with it
-through the `mcp__computer-use__*` tools does not work reliably in this
-environment: the process and its top-level window are real (confirmed via
-`Get-Process` / raw Win32 `ShowWindow`/`GetWindowRect` calls — the window
-briefly reports `IsIconic: False` with a normal on-screen rect immediately
-after a manual restore), but it does not appear in computer-use screenshots
-or the taskbar, and gets re-minimized again within a second or two — faster
-than a restore-then-screenshot round trip. This looks like an environment-
-level guard that snaps back windows belonging to processes that aren't (yet)
-fully recognized as the "focused, allowlisted" app, not a bug in Prismic or
-in the test code.
+While scaffolding `tests/gui/`, a Claude session couldn't get computer-use
+to show the running `prismic` window and spent a long time on Win32-level
+diagnostics (`ShowWindow`/`GetWindowRect`/`IsIconic` via PowerShell),
+building a theory about an environment-level guard that silently
+re-minimizes unrecognized windows. The user later reported watching the app
+open and then disappear — and the real cause turned out to be much simpler:
+that session ran `taskkill //F //IM prismic.exe` / `//IM python.exe` as
+"cleanup" partway through, which kills every process with that image name
+system-wide, including the user's own just-launched instance. See
+[[feedback-no-blanket-taskkill]] in Claude's memory.
 
-Practical implications:
+Net takeaway for future sessions:
 
-- **Don't rely on computer-use for this project's routine UI verification.**
-  Treat `tests/gui/` (pytest-qt) as the primary, trustworthy layer for
-  behavioral/state correctness — it drives the real Qt event loop in-process
-  and isn't affected by this issue.
-- pytest-qt verifies application logic and state, not actual on-screen
-  rendering/visibility/occlusion (see conversation history) — that gap still
-  needs a human, or a real screenshot the human captures and shares,
-  whenever pixel-level/visual confirmation genuinely matters.
-- If a future session wants to retry computer-use against this app, it's
-  worth first checking whether this limitation still reproduces before
-  re-investing debugging effort — it may be fixed by then, or may not.
+- **Never `taskkill`/kill a GUI process by image name.** Only kill a
+  specific PID you personally spawned and can positively identify as
+  orphaned. If the user says they launched an instance, it's theirs — leave
+  it running unless asked to close it.
+- Whether there's *also* a genuine environment quirk around computer-use
+  and this app's window (separate from the taskkill mistake) is still
+  unconfirmed — the diagnostic trail was contaminated by the taskkill, so
+  don't trust the earlier "re-minimizing guard" theory as established fact.
+  If computer-use still can't see the window after avoiding any
+  process-killing, it's worth investigating fresh rather than assuming the
+  old theory applies.
+- `tests/gui/` (pytest-qt) remains the reliable, always-available layer for
+  behavioral/state correctness regardless of how the computer-use question
+  shakes out. It doesn't verify actual on-screen rendering/visibility
+  though — that gap still needs a human or a real screenshot when
+  pixel-level confirmation genuinely matters.
