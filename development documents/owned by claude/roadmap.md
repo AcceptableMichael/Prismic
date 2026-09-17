@@ -29,7 +29,10 @@ arriving once there's application-layer behavior worth showing.
       (see [`requirements-amendments.md`](requirements-amendments.md)).
 - [ ] **Phase 2 — [Indexing & reconciliation](phases/02-indexing-and-reconciliation.md)**
       Filesystem scanning, content hashing, and move/change/missing
-      reconciliation against persisted media identity.
+      reconciliation against persisted media identity. All logic and its
+      tests are done; the two remaining sub-goals (actually running on a
+      background thread, and wiring into collection-open) are deliberately
+      deferred until Phase 3's worker pool exists to dispatch onto.
 - [ ] **Phase 3 — [Application layer](phases/03-application-layer.md)**
       `PrismicSession`, the command dispatcher, tag/mapping/filter commands,
       undo history, and the query layer (intersection filtering, ordering,
