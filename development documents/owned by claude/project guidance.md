@@ -156,6 +156,37 @@ correctness regardless — it doesn't verify actual on-screen
 rendering/visibility, so use computer-use (via the launch path above) when
 pixel-level confirmation genuinely matters.
 
+## 2026-09-17: UI theming pass — two more gotchas found via computer-use
+
+Added `ui/theme.py` (a global QSS stylesheet), `ui/thumbnail_provider.py` +
+`ui/thumbnail_delegate.py` (async, cached thumbnails for the result list,
+built on the existing `WorkerPool`/`FutureWatcher` staleness pattern from
+`media/loader.py`), and object-name hooks through `main_window.py`,
+`tag_panel.py`, `viewer.py` for the stylesheet to key off. Two more
+real bugs surfaced only by actually looking at the running app, not by
+`pytest`/`ruff`/`mypy` (all green throughout):
+
+1. **Qt's hex-with-alpha format is `#AARRGGBB` (alpha *first*), not the
+   CSS-web `#RRGGBBAA` convention.** Get this backwards — as the theme's
+   translucent selection/hover colors originally did (`"#5b93f533"`
+   meaning "50/50% blue at ~20% alpha") — and Qt doesn't error; it just
+   reads the alpha nibbles as part of the RGB value, silently producing a
+   fully-opaque, wrong color. A "20% blue selection wash" rendered as
+   solid yellow-green until caught by an actual screenshot. Applies to
+   both `QColor("#...")` in Python and colors written directly into QSS.
+2. **A `python.exe`/`prismic.exe` computer-use grant is tied to the exact
+   resolved executable path, and `uv run` can relink/recreate those paths
+   across runs** (observed both as a literal path change and, once, a
+   "black window" that was actually computer-use's own masking rectangle
+   for an unrecognized process — not a rendering bug at all). If a
+   previously-working `request_access` grant for this app's process
+   suddenly shows a blank/masked/black window, re-grant that exact
+   process name again before assuming the app itself broke — check with a
+   direct `QWidget.grab()`-to-PNG from a throwaway script if there's any
+   doubt about whether it's a real rendering issue versus a capture/grant
+   issue, since that path bypasses computer-use's screen capture (and
+   therefore its masking) entirely.
+
 Two more launch-path notes from Phase 5's computer-use pass, same root
 cause each time (a step that only reveals itself with real interaction,
 not automated assertions):

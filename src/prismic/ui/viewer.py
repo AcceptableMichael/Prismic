@@ -32,6 +32,7 @@ class MediaViewer(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("mediaViewer")
 
         self._image_view = ImageView()
         self._video_widget = QVideoWidget()
@@ -43,20 +44,24 @@ class MediaViewer(QWidget):
         self._video_player.qt_player.playbackStateChanged.connect(self._on_playback_state_changed)
 
         self._empty_label = QLabel("No collection open")
+        self._empty_label.setObjectName("emptyStateLabel")
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._stack = QStackedWidget()
+        self._stack.setObjectName("viewerStack")
         self._stack.addWidget(self._empty_label)
         self._stack.addWidget(self._image_view)
         self._stack.addWidget(self._video_widget)
 
         self._play_pause_button = QPushButton("Play")
+        self._play_pause_button.setObjectName("playPauseButton")
         self._play_pause_button.clicked.connect(self.toggle_playback)
         self._seek_slider = QSlider(Qt.Orientation.Horizontal)
         self._seek_slider.setRange(0, 0)
         self._seek_slider.sliderMoved.connect(self._video_player.seek)
 
         self._controls = QWidget()
+        self._controls.setObjectName("viewerControls")
         controls_layout = QHBoxLayout(self._controls)
         controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.addWidget(self._play_pause_button)
@@ -64,6 +69,8 @@ class MediaViewer(QWidget):
         self._controls.setVisible(False)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addWidget(self._stack)
         layout.addWidget(self._controls)
 

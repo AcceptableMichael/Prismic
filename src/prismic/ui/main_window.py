@@ -47,6 +47,8 @@ from prismic.ui.instance_bridge import InstanceBridge, request_focus
 from prismic.ui.keyboard import KeyboardController
 from prismic.ui.result_model import MediaIdRole, ResultListModel
 from prismic.ui.tag_panel import TagPanel
+from prismic.ui.thumbnail_delegate import ThumbnailDelegate
+from prismic.ui.thumbnail_provider import ThumbnailProvider
 from prismic.ui.viewer import MediaViewer
 
 _Index = QModelIndex | QPersistentModelIndex
@@ -103,6 +105,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self._placeholder = QLabel("No collection open")
+        self._placeholder.setObjectName("emptyStateLabel")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.filter_panel = TagPanel("Tags (filter)", editable=True)
@@ -114,9 +117,23 @@ class MainWindow(QMainWindow):
         self.item_tag_panel = TagPanel("Tags on this item", editable=False)
         self.item_tag_panel.toggle_requested.connect(self._on_item_tag_toggle)
 
+        self.thumbnail_provider = ThumbnailProvider(self)
+        self.thumbnail_provider.thumbnail_ready.connect(self._on_thumbnail_ready)
+        self.thumbnail_provider.decode_failed.connect(self._on_thumbnail_ready)
+
         self.result_model = ResultListModel(self)
         self.result_list = QListView()
+        self.result_list.setObjectName("resultList")
+        self.result_list.viewport().setMouseTracking(True)
         self.result_list.setModel(self.result_model)
+        self.result_list.setItemDelegate(
+            ThumbnailDelegate(
+                self.thumbnail_provider,
+                self._resolve_media_path,
+                lambda: self.session.worker_pool if self.session is not None else None,
+                self.result_list,
+            )
+        )
         self.result_list.selectionModel().currentChanged.connect(self._on_result_selection_changed)
 
         self.viewer = MediaViewer()
@@ -128,10 +145,13 @@ class MainWindow(QMainWindow):
 
         right_side = QWidget()
         right_layout = QVBoxLayout(right_side)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
         right_layout.addWidget(self.viewer, 1)
         right_layout.addWidget(self.item_tag_panel)
         splitter.addWidget(right_side)
         splitter.setSizes([220, 320, 640])
+        splitter.setHandleWidth(1)
         self._splitter = splitter
 
         self._central_stack = QStackedWidget()
@@ -167,6 +187,7 @@ class MainWindow(QMainWindow):
         if self._instance_bridge is not None:
             self._instance_bridge.release()
             self._instance_bridge = None
+        self.thumbnail_provider.reset()
 
         try:
             session = PrismicSession.open(path)
@@ -387,6 +408,19 @@ class MainWindow(QMainWindow):
 
     def _on_viewer_error(self, reason: str) -> None:
         self.statusBar().showMessage(f"Could not load media: {reason}", 5000)
+
+    def _resolve_media_path(self, media_id: int) -> Path | None:
+        if self.session is None:
+            return None
+        media = self.session.media.get(media_id)
+        if media is None:
+            return None
+        return self.session.collection.root / media.relative_path
+
+    def _on_thumbnail_ready(self, media_id: int) -> None:
+        row = self.result_model.row_for_media_id(media_id)
+        if row is not None:
+            self.result_list.update(self.result_model.index(row, 0))
 
     # -- Keyboard -------------------------------------------------------------
 

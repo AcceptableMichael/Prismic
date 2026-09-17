@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from prismic.ui.main_window import MainWindow
+from prismic.ui.theme import STYLESHEET
 
 # Qt Multimedia's "windows" (Media Foundation) backend has no VP8/VP9/Opus/
 # Vorbis decoders, so it can't play WebM at all -- a required format per the
@@ -30,6 +31,7 @@ def run(argv: list[str] | None = None) -> int:
     # file once Phase 7 registers the file association (see
     # requirements-amendments.md).
     app = QApplication(args)
+    app.setStyleSheet(STYLESHEET)
     initial_path = Path(args[1]) if len(args) > 1 else None
     window = MainWindow(initial_path)
     window.show()
