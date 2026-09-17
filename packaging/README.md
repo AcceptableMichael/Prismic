@@ -131,6 +131,17 @@ exists for the "I just want the portable exe plus the association,
 no installer" case, but the installer is the more complete answer to
 "how do I install this on another machine."
 
+**Wizard flow is deliberately trimmed**, user-requested: the desktop-icon
+checkbox lives directly on the install-location page (`[Code]` adds it to
+`WizardForm.SelectDirPage` rather than using a separate `[Tasks]`-driven
+"Select Additional Tasks" page), unchecked by default; and the "Ready to
+Install" confirmation, the "Setup is not complete..." abort-confirmation
+prompt, and the "Completing the Setup Wizard" finished page are all
+skipped (`DisableReadyPage`/`DisableFinishedPage` in `[Setup]`, and a
+`CancelButtonClick` override for the abort prompt). End to end: pick a
+folder, optionally tick the desktop-icon box, click Next, and it installs
+and launches Prismic with no further prompts.
+
 Compiling this script is a local build step, same as the PyInstaller
 build (it just reads `dist\prismic.exe` and writes `dist\PrismicSetup.exe`,
 both inside the repo) -- but per the same standing boundary as

@@ -33,6 +33,21 @@ session shouldn't make on the human's actual machine on its own initiative
       UPX already compressed); its value is the install experience, not
       size. See [`packaging/README.md`](../../packaging/README.md#shrinking-the-build)
       for the measured comparison.
+- [x] Wizard flow trimmed to a single screen, user-requested: the
+      desktop-icon checkbox merged onto the install-location page
+      (`[Code]` in `prismic.iss` adds it directly to
+      `WizardForm.SelectDirPage`, unchecked by default, instead of a
+      separate `[Tasks]`-driven page), and the "Ready to Install"
+      confirmation, "Setup is not complete..." abort prompt, and
+      "Completing the Setup Wizard" finished page are all suppressed
+      (`DisableReadyPage`/`DisableFinishedPage`, plus a `CancelButtonClick`
+      override). Verified by compiling cleanly (Inno's compiler does
+      static-check the Pascal `[Code]` section, catching bad
+      class/property references at compile time) — actually *running*
+      the wizard to see it click-by-click wasn't done by this session,
+      same reasoning as not running the installer at all (see below); the
+      human should give the flow a try and report back if anything looks
+      off.
 - [ ] macOS build produces a self-contained app bundle — blocked, no macOS
       access from this environment
 - [ ] Linux build produces a self-contained executable/bundle — blocked, no
