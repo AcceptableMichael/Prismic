@@ -2,9 +2,11 @@
 # bundler choice and rationale.
 #
 # Build from the repo root with:
-#   uv run --project . pyinstaller packaging/prismic.spec --noconfirm
+#   uv run --project . pyinstaller packaging/prismic.spec --noconfirm --upx-dir <path-to-upx>
 # (or, from a venv that already has pyinstaller installed:
-#   pyinstaller packaging/prismic.spec --noconfirm)
+#   pyinstaller packaging/prismic.spec --noconfirm --upx-dir <path-to-upx>)
+# `--upx-dir` is optional -- PyInstaller just skips compression if upx isn't
+# found on PATH or passed explicitly, it doesn't fail the build.
 #
 # Qt Multimedia's ffmpeg backend plugin isn't picked up by PyInstaller's
 # default PySide6 hook (it only collects the plugin *categories* it thinks
@@ -53,7 +55,12 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,
+    upx=True,
+    # The Python DLL and MSVC runtime DLLs are known to be flaky under UPX
+    # (crashes / AV false positives reported upstream) for the size they'd
+    # save -- not worth the risk. Everything else (Qt's much larger DLLs)
+    # still gets compressed.
+    upx_exclude=["python3*.dll", "vcruntime*.dll"],
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,

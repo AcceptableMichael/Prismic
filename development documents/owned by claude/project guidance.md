@@ -59,6 +59,19 @@ If `uv` isn't on `PATH` in a given shell, it's installed via winget at
 at `Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` also adds it
 automatically. It should just work in any fresh shell.
 
+## Packaging tools (Phase 7)
+
+Installed via `winget` on this machine for building distributable
+artifacts — see [`packaging/README.md`](../../packaging/README.md) for how
+they're used:
+
+- `UPX.UPX` — DLL/exe compression for the PyInstaller build. On `PATH` as
+  `upx` (winget adds a shim at `%LOCALAPPDATA%\Microsoft\WinGet\Links`).
+- `JRSoftware.InnoSetup` — builds the Windows installer. `ISCC.exe` (the
+  command-line compiler) lands at
+  `%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe`, not on `PATH` by
+  default.
+
 ## Git
 
 Git is installed standalone (winget, `Git.Git`) and on `PATH`. Global identity

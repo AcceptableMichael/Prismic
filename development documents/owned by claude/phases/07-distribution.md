@@ -20,8 +20,19 @@ session shouldn't make on the human's actual machine on its own initiative
       Nuitka/Briefcase. See [`packaging/README.md`](../../packaging/README.md#bundler-choice-pyinstaller)
       for the full rationale.
 - [x] Windows build produces a self-contained executable
-      (`packaging/prismic.spec` → `dist/prismic.exe`, ~55MB, no Python
-      install required on the target machine)
+      (`packaging/prismic.spec` → `dist/prismic.exe`, ~49MB with UPX
+      compression enabled, no Python install required on the target
+      machine)
+- [x] Windows installer (`packaging/windows/prismic.iss`, built with Inno
+      Setup → `dist/PrismicSetup.exe`) as an alternative to the bare
+      portable exe — per-user install, Start Menu/desktop shortcuts,
+      uninstaller, and registers the `.prismic` association automatically
+      as part of setup (see File type association below). Confirmed this
+      does *not* shrink the download further (~51MB, slightly larger than
+      the ~49MB exe it wraps — LZMA2 can't meaningfully re-compress data
+      UPX already compressed); its value is the install experience, not
+      size. See [`packaging/README.md`](../../packaging/README.md#shrinking-the-build)
+      for the measured comparison.
 - [ ] macOS build produces a self-contained app bundle — blocked, no macOS
       access from this environment
 - [ ] Linux build produces a self-contained executable/bundle — blocked, no
@@ -47,15 +58,18 @@ its directory when double-clicked. That requires registering the extension
 with each OS during packaging/install — it's not something the file itself
 can do.
 
-- [x] Windows: **script written, deliberately not run by this session** —
+- [x] Windows: **written, deliberately not run by this session, two ways** —
+      standalone script
       [`packaging/windows/register_file_association.ps1`](../../packaging/windows/register_file_association.ps1)
-      registers a per-user (`HKCU\Software\Classes`, no admin needed)
-      association from `.prismic` to a given `prismic.exe` path, plus an
-      `unregister_...` counterpart. Editing the real Windows registry is a
+      (registers a per-user `HKCU\Software\Classes` association against an
+      existing `dist\prismic.exe`, plus an `unregister_...` counterpart),
+      or as part of installing via `PrismicSetup.exe`
+      (`packaging/windows/prismic.iss`'s `[Registry]` section writes the
+      same keys during setup). Editing the real Windows registry is a
       persistent, machine-wide (well, per-user) OS setting change — outside
       what an agent should do on its own on a real machine per the
       standing safety rules, even inside an otherwise-autonomous project.
-      The script itself is real, reviewed code, not a stub; a human runs it
+      Both are real, reviewed code, not stubs; a human runs one of them
       when they actually want the association active.
 - [ ] macOS: not started — needs `CFBundleDocumentTypes` in an `Info.plist`,
       which needs the still-unstarted macOS `.app` bundle work first (see
@@ -115,14 +129,19 @@ Two different kinds of "not done" here, worth keeping distinct:
    specifics), but "should generalize" and "verified to work" are
    different claims, and only the Windows one is backed by an actual run.
 2. **Deliberately not self-executed (Windows file-association
-   registration):** unlike almost everything else in this project, this
-   one step edits real, persistent state on the actual machine outside the
-   repo/venv sandbox — the Windows registry. The standing agent safety
-   rules treat "modifying system settings" as something to hand to the
-   human rather than do autonomously, even where a project's own
-   `intended use.md` grants broad autonomy generally. The script is
-   written, reviewed, and ready; running it is a one-line, deliberate
-   choice for a human to make, not something this session did on its own.
+   registration, and running `PrismicSetup.exe` itself):** unlike almost
+   everything else in this project, these steps edit real, persistent
+   state on the actual machine outside the repo/venv sandbox — the Windows
+   registry, and (for the installer) the filesystem/Start Menu too. The
+   standing agent safety rules treat "modifying system settings" as
+   something to hand to the human rather than do autonomously, even where
+   a project's own `intended use.md` grants broad autonomy generally. Both
+   are written, reviewed, and ready; running either is a deliberate choice
+   for a human to make, not something this session did on its own. (Note:
+   *building/compiling* `PrismicSetup.exe` itself was fine to do
+   autonomously — that only reads/writes inside `dist/`, same as the
+   PyInstaller build. It's specifically *executing* it that's out of
+   scope here.)
 
 ## Tests
 

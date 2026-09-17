@@ -1,0 +1,82 @@
+; Inno Setup script for Prismic. Produces a single PrismicSetup.exe that
+; installs the app and (unlike a bare portable exe) can also register the
+; .prismic file association automatically, as part of setup -- see the
+; [Registry] section below. This is the "installer-driven registry
+; entries" approach the original phase plan called for, as an alternative
+; to running packaging/windows/register_file_association.ps1 by hand.
+;
+; Build (after building dist\prismic.exe from packaging\prismic.spec):
+;   "C:\Users\<you>\AppData\Local\Programs\Inno Setup 6\ISCC.exe" packaging\windows\prismic.iss
+; Output: dist\PrismicSetup.exe
+;
+; Per-user install (PrivilegesRequired=lowest): installs under the current
+; user's AppData, no admin elevation and no UAC prompt required, and the
+; file association it registers is HKCU (current user only) -- consistent
+; with register_file_association.ps1's own choice, and the least invasive
+; option. A machine-wide (HKLM, all-users) installer is a different,
+; larger step (needs admin, affects every account) that hasn't been asked
+; for.
+;
+; Same boundary as everywhere else in this project: nothing here is ever
+; executed automatically by a Claude session. Compiling this script (which
+; just reads dist\prismic.exe and writes PrismicSetup.exe, both inside the
+; repo) is a local build step like the PyInstaller build. *Running* the
+; resulting installer -- which does write to the real filesystem and
+; registry -- is for a human to do deliberately.
+
+#define MyAppName "Prismic"
+#define MyAppVersion "0.1.0"
+#define MyAppExeName "prismic.exe"
+
+[Setup]
+AppId={{6C1B2C63-6E0A-4F6E-8D2E-6A6E4B8B9B9E}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+DefaultDirName={localappdata}\Programs\{#MyAppName}
+DefaultGroupName={#MyAppName}
+DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
+OutputDir=..\..\dist
+OutputBaseFilename=PrismicSetup
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+UninstallDisplayIcon={app}\{#MyAppExeName}
+ArchitecturesInstallIn64BitMode=x64compatible
+
+[Files]
+Source: "..\..\dist\prismic.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"; Flags: unchecked
+
+[Registry]
+; Per-user .prismic association -- same keys register_file_association.ps1
+; writes by hand, just done as part of setup instead. `uninsdeletekey` on
+; the ProgID key means uninstalling cleanly removes the whole association,
+; not just the app files.
+Root: HKCU; Subkey: "Software\Classes\.prismic"; ValueType: string; ValueName: ""; ValueData: "Prismic.Collection"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Prismic.Collection"; ValueType: string; ValueName: ""; ValueData: "Prismic Collection"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Prismic.Collection\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"",0"
+Root: HKCU; Subkey: "Software\Classes\Prismic.Collection\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent unchecked
+
+[Code]
+// Tell the shell the file association changed so File Explorer picks it
+// up immediately, without requiring a logoff/logon -- same call
+// register_file_association.ps1 makes by hand.
+procedure SHChangeNotify(wEventId: Integer; uFlags: Integer; dwItem1, dwItem2: Longint);
+  external 'SHChangeNotify@shell32.dll stdcall';
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    SHChangeNotify($08000000, $0000, 0, 0); // SHCNE_ASSOCCHANGED, SHCNF_IDLIST
+end;
