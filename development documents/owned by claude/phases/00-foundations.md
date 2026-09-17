@@ -30,9 +30,9 @@ records what's done and what's still owed before Phase 1 starts in earnest.
 
 ## Cleanup before Phase 1
 
-- [ ] Remove or repurpose the placeholder keycap/background-randomizer demo
-      in [`main_window.py`](../../../src/prismic/ui/main_window.py) once
-      Phase 5 needs the window for real UI — no need to do this early, just
-      don't let it get mistaken for real functionality
+- [x] Remove or repurpose the placeholder keycap/background-randomizer demo
+      in [`main_window.py`](../../../src/prismic/ui/main_window.py) — replaced
+      with a neutral "No collection open" placeholder shell ahead of Phase 5's
+      real UI
 - [ ] Decide and document the minimum supported OS/Python patch versions if
       this becomes relevant for packaging (can defer to Phase 7)
