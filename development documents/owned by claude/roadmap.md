@@ -41,10 +41,12 @@ arriving once there's application-layer behavior worth showing.
       Surfaced a real environment gotcha: Qt Multimedia's default backend
       choice determines whether WebM actually plays at all — see the phase
       file.
-- [ ] **Phase 5 — [UI & viewer](phases/05-ui-and-viewer.md)**
+- [x] **Phase 5 — [UI & viewer](phases/05-ui-and-viewer.md)**
       Real main window wired to the application layer: tag list, filter
       selection, result view, media viewer (zoom/pan/playback), and the
-      keyboard input layer with chorded shortcuts.
+      keyboard input layer with chorded shortcuts. A computer-use pass over
+      the real app (not just automated tests) caught a genuine keyboard-
+      focus bug — see the phase file.
 - [ ] **Phase 6 — [Integration & hardening](phases/06-integration-and-hardening.md)**
       End-to-end open-collection flow, responsiveness under rapid
       navigation/changing result sets, failure handling, collection locking,

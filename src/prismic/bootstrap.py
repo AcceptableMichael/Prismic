@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
@@ -22,7 +23,14 @@ os.environ.setdefault("QT_MEDIA_BACKEND", "ffmpeg")
 
 
 def run(argv: list[str] | None = None) -> int:
-    app = QApplication(argv if argv is not None else sys.argv)
-    window = MainWindow()
+    args = argv if argv is not None else sys.argv
+    # QApplication strips the Qt options it recognizes from `args` in place,
+    # leaving anything else (our own collection path argument) untouched --
+    # this is how the OS invokes Prismic on double-clicking a `.prismic`
+    # file once Phase 7 registers the file association (see
+    # requirements-amendments.md).
+    app = QApplication(args)
+    initial_path = Path(args[1]) if len(args) > 1 else None
+    window = MainWindow(initial_path)
     window.show()
     return app.exec()

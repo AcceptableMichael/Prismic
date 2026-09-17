@@ -142,3 +142,26 @@ remains the reliable, always-available layer for behavioral/state
 correctness regardless — it doesn't verify actual on-screen
 rendering/visibility, so use computer-use (via the launch path above) when
 pixel-level confirmation genuinely matters.
+
+Two more launch-path notes from Phase 5's computer-use pass, same root
+cause each time (a step that only reveals itself with real interaction,
+not automated assertions):
+
+- **`Start-Process -ArgumentList` does not auto-quote array elements.**
+  Passing a path containing spaces as a separate array element (e.g.
+  `-ArgumentList "run","prismic","C:\...\my data folder"`) silently mangles
+  the command line — `Start-Process` joins elements with spaces but does
+  **not** wrap ones that need quoting, so the path splits into several
+  bogus positional args and the launch fails fast (no window, no error
+  surfaced to the caller). Pass one pre-quoted string instead:
+  `-ArgumentList 'run prismic "C:\...\my data folder"'`.
+- **A GUI keyboard test that sends keys straight to the top-level window
+  (`qtbot.keyClick(window, ...)`) is not equivalent to a real user typing
+  after clicking somewhere.** It bypasses Qt's actual focus-based event
+  delivery, so it can't catch a focused child widget's own key handling
+  (e.g. `QAbstractItemView`'s built-in "type to search," which swallowed
+  this app's single-letter shortcuts before Phase 5 fixed the keyboard
+  wiring to use an application-level event filter). See
+  [`phases/05-ui-and-viewer.md`](phases/05-ui-and-viewer.md) for the full
+  writeup — this is exactly the class of bug a computer-use pass exists to
+  catch that automated tests, as originally written, missed.
