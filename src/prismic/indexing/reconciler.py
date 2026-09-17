@@ -30,6 +30,11 @@ from prismic.indexing.hashing import hash_file
 from prismic.indexing.scanner import scan
 from prismic.persistence.repositories.media_repository import MediaRepository
 
+__all__ = ["HashedFile", "Reconciler", "ReconciliationResult", "hash_file", "run_reconciliation"]
+# `hash_file` is re-exported (not just imported for internal use) so tests
+# can monkeypatch `prismic.indexing.reconciler.hash_file` specifically to
+# simulate a file disappearing between the scan and the hash.
+
 
 @dataclass(frozen=True, slots=True)
 class HashedFile:

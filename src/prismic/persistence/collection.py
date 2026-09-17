@@ -9,6 +9,7 @@ file-association launch case), both converging here.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 from types import TracebackType
@@ -76,15 +77,18 @@ class OpenCollection:
         self.close()
 
 
-def open_collection(path: Path) -> OpenCollection:
+def open_collection(path: str | os.PathLike[str]) -> OpenCollection:
     """Open (or create) the collection at `path`.
 
     `path` may be a collection root directory or a direct `.prismic` file
-    path. On any failure — lock contention, an unreadable/incompatible
-    database, or a failed migration — no partial session is left behind:
-    the lock and connection (whichever were acquired) are released and the
-    error propagates.
+    path — and a plain string or any path-like object, not just a `Path`,
+    since this is the entry point argv-driven launches (and callers in
+    other processes/languages) hand a path to. On any failure — lock
+    contention, an unreadable/incompatible database, or a failed migration
+    — no partial session is left behind: the lock and connection (whichever
+    were acquired) are released and the error propagates.
     """
+    path = Path(path)
     root = path.parent if path.is_file() else path
     database_path = resolve_database_path(path)
 

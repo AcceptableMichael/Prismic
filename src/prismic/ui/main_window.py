@@ -11,7 +11,7 @@ from __future__ import annotations
 from concurrent.futures import Future
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QModelIndex, QObject, QPersistentModelIndex, Qt
+from PySide6.QtCore import QEvent, QModelIndex, QObject, QPersistentModelIndex, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -86,7 +86,18 @@ class MainWindow(QMainWindow):
         app.installEventFilter(self)
 
         if initial_path is not None:
-            self.open_collection(initial_path)
+            # Deferred to the next event-loop iteration rather than opened
+            # right here: the caller (bootstrap.run()) calls `.show()`
+            # immediately after constructing this window, before starting
+            # the event loop -- opening synchronously in __init__ meant a
+            # "collection already open elsewhere" QMessageBox could pop up
+            # against a window that was never actually shown yet, then an
+            # empty placeholder window would appear only *after* the
+            # dialog was dismissed. A zero-delay QTimer runs after `.show()`
+            # has taken effect, so the window is visibly there first and
+            # any error dialog reads as "this window couldn't open X"
+            # rather than appearing to come from nowhere.
+            QTimer.singleShot(0, lambda: self.open_collection(initial_path))
 
     def _build_ui(self) -> None:
         self._placeholder = QLabel("No collection open")

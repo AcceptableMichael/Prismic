@@ -19,6 +19,42 @@ def _open_and_wait(qtbot: QtBot, window: MainWindow, collection_dir: Path) -> No
     qtbot.waitUntil(lambda: window.result_model.rowCount() == 2, timeout=5000)
 
 
+def test_initial_path_opens_after_construction_not_synchronously_in_init(
+    qtbot: QtBot, collection_dir: Path
+) -> None:
+    """The open is deferred (QTimer.singleShot(0, ...)) specifically so the
+    window is already shown by the time any "could not open" dialog could
+    appear -- see the comment in MainWindow.__init__. Constructing must not
+    have opened it yet; pumping the event loop afterward should."""
+    win = MainWindow(initial_path=collection_dir)
+    qtbot.addWidget(win)
+
+    assert win.session is None  # not yet -- still deferred
+
+    qtbot.waitUntil(lambda: win.session is not None, timeout=2000)
+    qtbot.waitUntil(lambda: win.result_model.rowCount() == 2, timeout=5000)
+
+
+def test_initial_path_failure_still_shows_the_error_after_construction(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "broken"
+    root.mkdir()
+    (root / "broken.prismic").write_bytes(b"not a real database")
+
+    shown_messages: list[str] = []
+    monkeypatch.setattr(
+        "prismic.ui.main_window.QMessageBox.critical",
+        lambda *args, **kwargs: shown_messages.append(args[-1]),
+    )
+
+    win = MainWindow(initial_path=root)
+    qtbot.addWidget(win)
+
+    qtbot.waitUntil(lambda: len(shown_messages) == 1, timeout=2000)
+    assert win.session is None
+
+
 def test_window_has_title(window: MainWindow) -> None:
     assert window.windowTitle() == "Prismic"
 

@@ -16,6 +16,14 @@ from prismic.persistence.errors import (
 )
 
 
+def test_opening_accepts_a_plain_string_path_not_just_a_path_object(tmp_path: Path) -> None:
+    collection_root = tmp_path / "vacation"
+    collection_root.mkdir()
+
+    with open_collection(str(collection_root)) as opened:
+        assert opened.collection.root == collection_root
+
+
 def test_opening_an_empty_directory_creates_a_collection_named_after_it(tmp_path: Path) -> None:
     collection_root = tmp_path / "vacation photos"
     collection_root.mkdir()

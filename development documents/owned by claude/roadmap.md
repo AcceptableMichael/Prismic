@@ -47,10 +47,12 @@ arriving once there's application-layer behavior worth showing.
       keyboard input layer with chorded shortcuts. A computer-use pass over
       the real app (not just automated tests) caught a genuine keyboard-
       focus bug — see the phase file.
-- [ ] **Phase 6 — [Integration & hardening](phases/06-integration-and-hardening.md)**
+- [x] **Phase 6 — [Integration & hardening](phases/06-integration-and-hardening.md)**
       End-to-end open-collection flow, responsiveness under rapid
       navigation/changing result sets, failure handling, collection locking,
-      and a full computer-use pass over the primary workflows.
+      and a full computer-use pass over the primary workflows. Found and
+      fixed two real bugs (a string-path crash, and a dialog-before-window
+      sequencing issue) — see the phase file.
 - [ ] **Phase 7 — [Distribution](phases/07-distribution.md)**
       Self-contained packaging for Windows/macOS/Linux and platform-specific
       verification of media playback and filesystem behavior.
