@@ -69,6 +69,18 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 ; Tasks page for this to live on.
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Check: ShouldCreateDesktopIcon
 
+[UninstallDelete]
+; Inno's uninstaller only removes files it explicitly installed, then
+; tries to remove {app} itself -- which only succeeds if it's completely
+; empty. Anything else that ends up in there (even something as
+; innocuous as a Windows-generated desktop.ini/thumbs.db from browsing
+; the folder) makes it leave the directory behind rather than guess at
+; what's safe to delete. {app} is a directory dedicated solely to this
+; app (preferences live in %APPDATA%\Prismic instead, never here -- see
+; persistence/preferences.py), so it's safe to just force-remove it
+; outright on uninstall.
+Type: filesandordirs; Name: "{app}"
+
 [Registry]
 ; Per-user .prismic association -- same keys register_file_association.ps1
 ; writes by hand, just done as part of setup instead. `uninsdeletekey` on

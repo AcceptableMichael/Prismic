@@ -48,6 +48,20 @@ session shouldn't make on the human's actual machine on its own initiative
       same reasoning as not running the installer at all (see below); the
       human should give the flow a try and report back if anything looks
       off.
+- [x] Uninstall actually removes the install directory: the human reported
+      that going through Windows' built-in uninstall flow left
+      `%LOCALAPPDATA%\Programs\Prismic` behind. Expected Inno Setup
+      behavior, not a bug -- its uninstaller only deletes the files it
+      explicitly installed and then tries `RemoveDir` on `{app}`, which
+      only succeeds if the folder is completely empty; any stray file
+      (even an OS-generated `desktop.ini`/`thumbs.db` from browsing the
+      folder) makes it back off rather than guess what's safe to delete.
+      Fixed with an `[UninstallDelete] Type: filesandordirs; Name: "{app}"`
+      entry, safe here specifically because `{app}` is a directory
+      dedicated solely to this app -- preferences live in
+      `%APPDATA%\Prismic` instead, confirmed via `preferences.py`, so
+      there's never a reason for anything the user cares about to end up
+      under the install directory.
 - [ ] macOS build produces a self-contained app bundle — blocked, no macOS
       access from this environment
 - [ ] Linux build produces a self-contained executable/bundle — blocked, no
