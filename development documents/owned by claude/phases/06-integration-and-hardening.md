@@ -14,6 +14,11 @@ per-component.
       duplicate media identities created
 - [ ] Full tag/filter/navigate/edit-mapping/undo loop exercised as one
       continuous session, not just per-command unit tests
+- [ ] Launching Prismic with a `.prismic` file path argument opens straight
+      to that collection (the double-click case from
+      [`requirements-amendments.md`](../requirements-amendments.md)); full
+      OS-level double-click verification happens once Phase 7 registers the
+      file association, but the argv-driven open path is testable now
 
 ## Responsiveness under load
 
@@ -34,6 +39,10 @@ per-component.
       instances
 - [ ] Mid-scan filesystem errors (permission denied on a subdirectory, file
       disappearing mid-hash) don't crash the app or corrupt state
+- [ ] Opening/double-clicking a `.prismic` file that's already open (locked)
+      in another running instance is handled gracefully — e.g. focus the
+      existing window or show a clear message — rather than corrupting the
+      lock or crashing
 
 ## Full computer-use verification pass
 

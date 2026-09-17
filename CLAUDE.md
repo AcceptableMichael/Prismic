@@ -19,3 +19,5 @@ Project documentation lives in `development documents/`, split by ownership:
 @development documents/owned by claude/project guidance.md
 
 @development documents/owned by claude/roadmap.md
+
+@development documents/owned by claude/requirements-amendments.md

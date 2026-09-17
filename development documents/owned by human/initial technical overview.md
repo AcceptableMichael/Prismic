@@ -137,13 +137,15 @@ Only one collection is active at a time.
 
 The selected directory is the collection root.
 
-Prismic stores its metadata in:
+Prismic stores its metadata in a single SQLite file at the collection root:
 
 ```text
-<collection>/.prismic/
+<collection>/<name>.prismic
 ```
 
-`.prismic` is owned by Prismic, is excluded from media discovery, and travels with the collection when the directory is moved or copied.
+This `.prismic` file is owned by Prismic, is excluded from media discovery, and travels with the collection when the directory is moved or copied. It self-contains all of Prismic's data for the collection: SQLite is opened with a rollback journal (not WAL), so that with no connection open the collection is genuinely just this one file on disk — no permanent sidecar files. Exactly one `*.prismic` file is expected per collection root; finding more than one there is an error surfaced to the user, not silently resolved.
+
+Double-clicking a `.prismic` file opens Prismic directly to its containing directory, via an OS-level file-type association registered by the installer/bundle at package time (the file itself is data, not an executable).
 
 Media paths are stored relative to the collection root.
 
@@ -151,8 +153,8 @@ The database is authoritative for Prismic metadata. Global application preferenc
 
 Opening a collection:
 
-1. establishes the root;
-2. opens or creates `.prismic`;
+1. establishes the root — from a directory (by locating its `.prismic` file) or directly from a `.prismic` file path (e.g. the OS launching Prismic on double-click);
+2. opens or creates that `.prismic` file;
 3. validates/migrates the database;
 4. establishes the session;
 5. starts filesystem reconciliation.
@@ -203,7 +205,7 @@ V1:
 * recursively follows ordinary directories;
 * does not follow symbolic links;
 * does not follow Windows junctions/reparse points;
-* excludes `.prismic`;
+* excludes the collection's own `.prismic` file;
 * continues past individual permission/I/O failures.
 
 A failed scan is not interpreted as deletion.

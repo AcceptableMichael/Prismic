@@ -13,6 +13,27 @@ read it before making non-trivial changes. The repository layout and layer
 boundaries (`ui/ -> application/ -> domain/ -> persistence|indexing|media/`)
 described there are load-bearing; don't collapse them for convenience.
 
+## Manual test data: `my data folder`
+
+Next to this repo — i.e. a sibling of the `Prismic` folder, at
+`../my data folder` relative to the repo root (on this machine:
+`C:\Users\User\Desktop\my data folder`) — there is a small folder of sample
+images (currently a handful of `.webp`/`.png`/`.jpg`/`.avif` files). It's the
+human's manual testing ground for Prismic: a real directory to point the app
+at when opening a collection, exercising the viewer, tagging, filtering, etc.
+via computer-use or by hand.
+
+- It lives **outside** the repo on purpose and must **never** become part of
+  git/the repo — don't copy it in, don't move it in, don't add it as a
+  submodule, and don't reference it from code or tests as if it were a
+  project asset. If a fixture is needed for automated tests, add a real
+  fixture under `tests/fixtures/` instead (see the Phase 4 media-layer plan).
+- It will accumulate `.prismic/` metadata once a Prismic session opens it as
+  a collection — that's expected and fine, it's the human's own working
+  data, not something Claude needs to clean up.
+- Treat its contents as opaque sample data, not something to curate, rename,
+  or delete — it's for testing the app, not for Claude to organize.
+
 ## Environment: uv
 
 This project uses [uv](https://docs.astral.sh/uv/) for the Python toolchain,

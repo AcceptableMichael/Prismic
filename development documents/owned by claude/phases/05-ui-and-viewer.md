@@ -9,9 +9,14 @@ and replaces the Phase 0 placeholder window.
 
 - [ ] Replace the placeholder keycap/background-demo content in
       `main_window.py` with the real layout (tag panel, result view, viewer)
-- [ ] Main window opens a collection (directory picker) and constructs a
-      `PrismicSession` through the Phase 1/3 lifecycle, handling the
-      failed-open case visibly instead of silently
+- [ ] Main window opens a collection (directory or `.prismic`-file picker)
+      and constructs a `PrismicSession` through the Phase 1/3 lifecycle,
+      handling the failed-open case visibly instead of silently
+- [ ] App launch accepts a `.prismic` file path as a command-line argument
+      (`bootstrap.py`/`__main__.py`) and opens straight to that collection,
+      bypassing the picker — this is how the OS invokes Prismic on
+      double-click once Phase 7 registers the file association; see
+      [`requirements-amendments.md`](../requirements-amendments.md)
 - [ ] No widget talks to the database or filesystem directly — everything
       goes through application-layer commands/queries
 

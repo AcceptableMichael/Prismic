@@ -3,7 +3,10 @@
 Goal: the durable data model exists, is correct under transactions and
 migrations, and nothing above this layer needs to know that SQLite is
 underneath it. Corresponds to overview sections 2, 3 (identity fields only —
-reconciliation logic itself is Phase 2), and 6.
+reconciliation logic itself is Phase 2), and 6 — with the collection-file
+shape amended per
+[`requirements-amendments.md`](../requirements-amendments.md) (single
+`.prismic` file, not a `.prismic/` directory).
 
 ## Domain types (`domain/`)
 
@@ -31,19 +34,39 @@ reconciliation logic itself is Phase 2), and 6.
 - [ ] Never silently replace an unreadable/incompatible database with a new
       empty one — detect and surface this as an error instead
 
-## Collection lifecycle (`.prismic/`)
+## Collection lifecycle (single-file `.prismic` artifact)
 
-- [ ] Opening a collection: establish root → open/create `.prismic/` → open
-      or create the DB → validate/migrate → construct the session object →
+Per [`requirements-amendments.md`](../requirements-amendments.md), the
+collection's persistent data is a single SQLite file named `<name>.prismic`
+living directly in the collection root — not a hidden `.prismic/` directory.
+This supersedes overview section 2's directory-based description.
+
+- [ ] SQLite opened in a rollback-journal mode (`DELETE`/`TRUNCATE`), not
+      WAL, so that with no connection open the collection is genuinely one
+      file on disk — verify no lingering `-wal`/`-shm` files after a clean
+      close
+- [ ] Opening a collection accepts either a directory (locate its single
+      `*.prismic` file) or a direct file path (the OS file-association
+      launch case from Phase 7 hands this in via argv) — both converge on
+      one code path
+- [ ] Creating a new collection in a directory with no `.prismic` file yet:
+      derive/prompt for a filename, create it there
+- [ ] Finding more than one `*.prismic` file at a directory root is
+      surfaced as an error, not silently resolved by picking one
+- [ ] Full open sequence: resolve the `.prismic` file → open or create it →
+      validate/migrate its schema → construct the session object →
       (reconciliation itself is wired in Phase 2, but the hook point exists
       here)
 - [ ] A failed open or migration leaves no partially-active session
-- [ ] `.prismic/` is excluded from media discovery (the exclusion rule lives
-      here even though the scanner that uses it is Phase 2)
+- [ ] The collection's own `.prismic` file is excluded from media discovery
+      by exact match (the exclusion rule lives here even though the scanner
+      that uses it is Phase 2)
 - [ ] Global application preferences stored separately from collection data
-      (decide and document the location, e.g. platform config dir)
+      (decide and document the location, e.g. platform config dir) — unlike
+      the collection file, this is app-wide state, not per-collection
 - [ ] Collection locking so only one Prismic instance writes to a given
-      collection at a time
+      `.prismic` file at a time (feeds the double-click-while-already-open
+      handling in Phase 6)
 
 ## Repositories (`persistence/repositories/`)
 

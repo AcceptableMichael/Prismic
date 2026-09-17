@@ -25,7 +25,8 @@ arriving once there's application-layer behavior worth showing.
       mainly records what's in place and what's still owed.
 - [ ] **Phase 1 — [Domain & persistence](phases/01-domain-and-persistence.md)**
       Media/Tag/Collection domain types, SQLite schema, migrations,
-      repositories, and the `.prismic` collection lifecycle.
+      repositories, and the single-file `.prismic` collection lifecycle
+      (see [`requirements-amendments.md`](requirements-amendments.md)).
 - [ ] **Phase 2 — [Indexing & reconciliation](phases/02-indexing-and-reconciliation.md)**
       Filesystem scanning, content hashing, and move/change/missing
       reconciliation against persisted media identity.
