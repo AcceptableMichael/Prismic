@@ -32,6 +32,7 @@ from prismic.ui.thumbnail_provider import ThumbnailProvider
 _Index = QModelIndex | QPersistentModelIndex
 
 _ROW_HEIGHT = 64
+_COMPACT_ROW_HEIGHT = 32
 _THUMB_SIZE = 48
 _MARGIN = 8
 
@@ -48,9 +49,16 @@ class ThumbnailDelegate(QStyledItemDelegate):
         self._provider = provider
         self._resolve_path = resolve_path
         self._worker_pool = worker_pool
+        # Off by default -- thumbnails cost a decode per file, and the
+        # plain filename list is the lighter-weight, always-available
+        # option (View > Show Thumbnails opts in). Toggled by MainWindow;
+        # this delegate owns the flag since it's the one that decides row
+        # height and whether to paint/request a thumbnail at all.
+        self.show_thumbnails = False
 
     def sizeHint(self, option: QStyleOptionViewItem, index: _Index) -> QSize:
-        return QSize(option.rect.width(), _ROW_HEIGHT)
+        height = _ROW_HEIGHT if self.show_thumbnails else _COMPACT_ROW_HEIGHT
+        return QSize(option.rect.width(), height)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: _Index) -> None:
         media_id = index.data(MediaIdRole)
@@ -71,15 +79,18 @@ class ThumbnailDelegate(QStyledItemDelegate):
         elif hovered:
             painter.fillRect(rect, QColor(theme.HOVER_WASH))
 
-        thumb_rect = QRectF(
-            rect.x() + _MARGIN,
-            rect.y() + (rect.height() - _THUMB_SIZE) / 2,
-            _THUMB_SIZE,
-            _THUMB_SIZE,
-        )
-        self._paint_thumbnail(painter, thumb_rect, media_id, name)
+        if self.show_thumbnails:
+            thumb_rect = QRectF(
+                rect.x() + _MARGIN,
+                rect.y() + (rect.height() - _THUMB_SIZE) / 2,
+                _THUMB_SIZE,
+                _THUMB_SIZE,
+            )
+            self._paint_thumbnail(painter, thumb_rect, media_id, name)
+            text_x = thumb_rect.right() + _MARGIN + 4
+        else:
+            text_x = rect.x() + _MARGIN
 
-        text_x = thumb_rect.right() + _MARGIN + 4
         text_rect = QRectF(text_x, rect.y(), rect.right() - text_x - _MARGIN, rect.height())
         painter.setPen(QPen(QColor(theme.TEXT_PRIMARY)))
         metrics = painter.fontMetrics()

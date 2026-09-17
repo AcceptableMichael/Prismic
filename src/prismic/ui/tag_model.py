@@ -1,36 +1,31 @@
-"""A checkable Qt list model over a collection's tags.
+"""A passive Qt list model over a collection's tags.
 
 Reused for two different purposes in the UI, each with a different notion
-of "checked": the filter panel (checked = part of the active filter) and
-the viewer's per-item tag panel (checked = mapped to the current item).
-Which one a given instance represents is entirely up to whatever supplies
-its `selected_tag_ids` — the model itself is agnostic.
+of "checked": the item-tags panel (checked = mapped to the current item)
+and the filter panel (checked = part of the active filter). Which one a
+given instance represents is entirely up to whatever supplies its
+`selected_tag_ids` -- the model itself is agnostic.
 
-Display-only: it never talks to the database itself. Toggling a checkbox
-emits `toggle_requested`, and the checked state doesn't actually change
-until whoever's listening dispatches the corresponding command and calls
-`set_tags()` again with the new true state.
+Display-only, like `result_model.ResultListModel`: it never talks to the
+database itself and holds no interaction logic of its own. Rows are
+painted and clicked via `TagRowDelegate`/`TagPanel`, which read `TagIdRole`
+and `CheckedRole` here and emit their own signals rather than writing back
+through this model -- there is deliberately no `setData()`.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import (
-    QAbstractListModel,
-    QModelIndex,
-    QObject,
-    QPersistentModelIndex,
-    Qt,
-    Signal,
-)
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, QPersistentModelIndex, Qt
 
 from prismic.domain.tag import Tag
 
 _Index = QModelIndex | QPersistentModelIndex
 
+TagIdRole = Qt.ItemDataRole.UserRole + 1
+CheckedRole = Qt.ItemDataRole.UserRole + 2
+
 
 class TagListModel(QAbstractListModel):
-    toggle_requested = Signal(int)  # tag_id
-
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._tags: list[Tag] = []
@@ -62,23 +57,13 @@ class TagListModel(QAbstractListModel):
         tag = self._tags[index.row()]
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             return tag.name
-        if role == Qt.ItemDataRole.CheckStateRole:
-            is_selected = tag.id in self._selected_tag_ids
-            return Qt.CheckState.Checked if is_selected else Qt.CheckState.Unchecked
+        if role == TagIdRole:
+            return tag.id
+        if role == CheckedRole:
+            return tag.id in self._selected_tag_ids
         return None
-
-    def setData(self, index: _Index, value: object, role: int = Qt.ItemDataRole.EditRole) -> bool:
-        if not index.isValid() or role != Qt.ItemDataRole.CheckStateRole:
-            return False
-        tag = self._tags[index.row()]
-        self.toggle_requested.emit(tag.id)
-        return True
 
     def flags(self, index: _Index) -> Qt.ItemFlag:
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
-        return (
-            Qt.ItemFlag.ItemIsEnabled
-            | Qt.ItemFlag.ItemIsSelectable
-            | Qt.ItemFlag.ItemIsUserCheckable
-        )
+        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable

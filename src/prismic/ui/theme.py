@@ -177,10 +177,11 @@ QDialog {{
     background: {BG_PANEL};
 }}
 
-/* -- List views (tag lists) -------------------------------------------------
-   The result list uses its own custom delegate for painting rows, so these
-   ::item rules only ever apply to the plain tag lists (filter panel + the
-   viewer's per-item tag panel). */
+/* -- List views ---------------------------------------------------------
+   Both the tag lists and the result list paint every pixel of a row
+   themselves (TagRowDelegate / ThumbnailDelegate) -- checkbox, hover and
+   selection washes included -- so Qt's own ::item styling is blanked out
+   here rather than layered underneath it. */
 
 QListView {{
     background: {BG_PANEL};
@@ -188,33 +189,23 @@ QListView {{
     outline: none;
     padding: 4px;
 }}
-QListView#tagList::item {{
-    padding: 7px 10px;
-    margin: 1px 4px;
-    border-radius: 6px;
-    color: {TEXT_PRIMARY};
+QListView#tagList::item, QListView#resultList::item {{
+    border: none;
+    padding: 0;
 }}
-QListView#tagList::item:hover {{
-    background: {HOVER_WASH};
+QListView#tagList::item:selected, QListView#resultList::item:selected {{
+    background: transparent;
 }}
-QListView#tagList::item:selected {{
-    background: {ACCENT_MUTED};
-    color: {TEXT_PRIMARY};
+QListView#tagList::item:hover, QListView#resultList::item:hover {{
+    background: transparent;
 }}
-QListView#tagList::indicator {{
-    width: 15px;
-    height: 15px;
-    border-radius: 4px;
-    border: 1.5px solid {BORDER};
-    background: {BG_PANEL_RAISED};
-    margin-right: 2px;
+
+QLineEdit#tagSearchBox {{
+    margin: 0 8px 8px 8px;
+    font-size: 12px;
 }}
-QListView#tagList::indicator:hover {{
-    border-color: {ACCENT};
-}}
-QListView#tagList::indicator:checked {{
-    background: {ACCENT};
-    border-color: {ACCENT};
+QLineEdit#tagRenameEdit {{
+    padding: 2px 6px;
 }}
 
 QListView#resultList {{

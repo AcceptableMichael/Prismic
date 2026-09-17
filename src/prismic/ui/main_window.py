@@ -12,7 +12,7 @@ from concurrent.futures import Future
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QModelIndex, QObject, QPersistentModelIndex, Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QKeyEvent
+from PySide6.QtGui import QAction, QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -23,8 +23,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSplitter,
     QStackedWidget,
-    QVBoxLayout,
-    QWidget,
 )
 
 from prismic.application.commands.filter_commands import (
@@ -70,7 +68,7 @@ class MainWindow(QMainWindow):
             on_navigate_previous=lambda: self._navigate(-1),
             on_navigate_next=lambda: self._navigate(1),
             on_undo=self._undo,
-            on_create_tag=self.filter_panel.prompt_new_tag,
+            on_create_tag=self.item_tag_panel.focus_search,
             on_toggle_tag_by_index=self._toggle_tag_by_index,
             on_chord_status_changed=self.statusBar().showMessage,
             parent=self,
@@ -108,14 +106,29 @@ class MainWindow(QMainWindow):
         self._placeholder.setObjectName("emptyStateLabel")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.filter_panel = TagPanel("Tags (filter)", editable=True)
+        # Two independent tag lists rather than one dual-purpose one: the
+        # top panel edits which tags are mapped to the file currently in
+        # the viewer, the bottom narrows which files are browsable at all
+        # (an intersection filter). Conflating "check to filter" and
+        # "check to tag" into a single list would mean browsing could
+        # silently mutate a file's tags -- kept deliberately separate.
+        self.item_tag_panel = TagPanel("Item tags")
+        self.item_tag_panel.toggle_requested.connect(self._on_item_tag_toggle)
+        self.item_tag_panel.create_and_check_requested.connect(self._on_item_create_and_check)
+        self.item_tag_panel.rename_requested.connect(self._on_tag_rename)
+        self.item_tag_panel.delete_requested.connect(self._on_tag_delete)
+
+        self.filter_panel = TagPanel("Filter")
         self.filter_panel.toggle_requested.connect(self._on_filter_toggle)
-        self.filter_panel.create_requested.connect(self._on_tag_create)
+        self.filter_panel.create_and_check_requested.connect(self._on_filter_create_and_check)
         self.filter_panel.rename_requested.connect(self._on_tag_rename)
         self.filter_panel.delete_requested.connect(self._on_tag_delete)
 
-        self.item_tag_panel = TagPanel("Tags on this item", editable=False)
-        self.item_tag_panel.toggle_requested.connect(self._on_item_tag_toggle)
+        tag_splitter = QSplitter(Qt.Orientation.Vertical)
+        tag_splitter.addWidget(self.item_tag_panel)
+        tag_splitter.addWidget(self.filter_panel)
+        tag_splitter.setSizes([1, 1])
+        tag_splitter.setHandleWidth(1)
 
         self.thumbnail_provider = ThumbnailProvider(self)
         self.thumbnail_provider.thumbnail_ready.connect(self._on_thumbnail_ready)
@@ -126,31 +139,23 @@ class MainWindow(QMainWindow):
         self.result_list.setObjectName("resultList")
         self.result_list.viewport().setMouseTracking(True)
         self.result_list.setModel(self.result_model)
-        self.result_list.setItemDelegate(
-            ThumbnailDelegate(
-                self.thumbnail_provider,
-                self._resolve_media_path,
-                lambda: self.session.worker_pool if self.session is not None else None,
-                self.result_list,
-            )
+        self._thumbnail_delegate = ThumbnailDelegate(
+            self.thumbnail_provider,
+            self._resolve_media_path,
+            lambda: self.session.worker_pool if self.session is not None else None,
+            self.result_list,
         )
+        self.result_list.setItemDelegate(self._thumbnail_delegate)
         self.result_list.selectionModel().currentChanged.connect(self._on_result_selection_changed)
 
         self.viewer = MediaViewer()
         self.viewer.load_error.connect(self._on_viewer_error)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.filter_panel)
+        splitter.addWidget(tag_splitter)
         splitter.addWidget(self.result_list)
-
-        right_side = QWidget()
-        right_layout = QVBoxLayout(right_side)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(0)
-        right_layout.addWidget(self.viewer, 1)
-        right_layout.addWidget(self.item_tag_panel)
-        splitter.addWidget(right_side)
-        splitter.setSizes([220, 320, 640])
+        splitter.addWidget(self.viewer)
+        splitter.setSizes([190, 260, 830])
         splitter.setHandleWidth(1)
         self._splitter = splitter
 
@@ -165,6 +170,13 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Open .prismic File…", self._prompt_open_file)
         file_menu.addSeparator()
         file_menu.addAction("Rescan", self._rescan)
+
+        view_menu = self.menuBar().addMenu("&View")
+        show_thumbnails_action = QAction("Show Thumbnails", self)
+        show_thumbnails_action.setCheckable(True)
+        show_thumbnails_action.setChecked(self._thumbnail_delegate.show_thumbnails)
+        show_thumbnails_action.toggled.connect(self._on_toggle_thumbnails)
+        view_menu.addAction(show_thumbnails_action)
 
     # -- Session lifecycle --------------------------------------------------
 
@@ -224,6 +236,18 @@ class MainWindow(QMainWindow):
         self._central_stack.setCurrentWidget(self._splitter)
         self._watch_reconciliation(session.initial_reconciliation)
         self._refresh_all()
+        # Two persistent QLineEdits (the tag search boxes) now live in the
+        # main window's own widget tree rather than only inside transient
+        # dialogs, so Qt's default initial-focus assignment on show() can
+        # land on one of them instead of nothing in particular. The global
+        # keyboard shortcuts deliberately stand down for *any* focused
+        # QLineEdit (see eventFilter/_focus_is_text_editing) -- correct
+        # while the user is actually typing a tag name, but it would
+        # silently kill every shortcut from the moment a collection opens
+        # if a search box just happened to inherit focus by default. Giving
+        # the result list focus explicitly is what "immediately keyboard-
+        # driven" actually requires here.
+        self.result_list.setFocus()
 
     def _on_raise_requested(self) -> None:
         self.setWindowState(
@@ -275,7 +299,7 @@ class MainWindow(QMainWindow):
         if self.session is None:
             return
         tags = self.session.tags.list_all()
-        self.filter_panel.model.set_tags(tags, frozenset(self.session.state.selected_tag_ids))
+        self.filter_panel.set_tags(tags, frozenset(self.session.state.selected_tag_ids))
 
         media_list = eligible_media(
             self.session.media, self.session.mappings, self.session.state.selected_tag_ids
@@ -290,10 +314,10 @@ class MainWindow(QMainWindow):
         assert self.session is not None
         current = self.session.state.current_item
         if current is None:
-            self.item_tag_panel.model.set_tags(tags, frozenset())
+            self.item_tag_panel.set_tags(tags, frozenset())
             return
         mapped_ids = frozenset(t.id for t in self.session.mappings.tags_for_media(current))
-        self.item_tag_panel.model.set_tags(tags, mapped_ids)
+        self.item_tag_panel.set_tags(tags, mapped_ids)
 
     def _sync_result_selection(self) -> None:
         assert self.session is not None
@@ -397,6 +421,39 @@ class MainWindow(QMainWindow):
         else:
             self.session.execute(MappingAddCommand(media_id=current, tag_id=tag_id))
         self._refresh_all()
+
+    def _on_item_create_and_check(self, name: str) -> None:
+        tag = self._create_tag_and_find(name)
+        if tag is not None:
+            self._on_item_tag_toggle(tag.id)
+
+    def _on_filter_create_and_check(self, name: str) -> None:
+        tag = self._create_tag_and_find(name)
+        if tag is not None:
+            self._on_filter_toggle(tag.id)
+
+    def _create_tag_and_find(self, name: str) -> Tag | None:
+        """Creates a tag and returns it by name, for the search-box's
+        "no match -> create it" flow, which needs the new tag's id to
+        immediately apply/select it in the same keystroke. `TagCreateCommand`
+        doesn't hand back the row it inserted, so this re-reads the tag list
+        after creating -- names are unique, so the match is unambiguous."""
+        if self.session is None:
+            return None
+        self._on_tag_create(name)
+        for tag in self.session.tags.list_all():
+            if tag.name == name:
+                return tag
+        return None  # creation failed (e.g. a duplicate name) -- _on_tag_create already warned
+
+    def _on_toggle_thumbnails(self, checked: bool) -> None:
+        self._thumbnail_delegate.show_thumbnails = checked
+        # Row heights changed, which QListView doesn't pick up from a
+        # repaint alone -- reset() forces it to re-query sizeHint for every
+        # row. That also clears the view's own selection highlight, so the
+        # current item's is restored right after.
+        self.result_list.reset()
+        self._sync_result_selection()
 
     def _toggle_tag_by_index(self, index: int) -> None:
         if self.session is None:

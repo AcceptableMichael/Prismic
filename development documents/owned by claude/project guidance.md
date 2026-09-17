@@ -187,6 +187,38 @@ real bugs surfaced only by actually looking at the running app, not by
    issue, since that path bypasses computer-use's screen capture (and
    therefore its masking) entirely.
 
+## 2026-09-17: a real bug only a live computer-use pass caught
+
+Reworked the tag UI again per follow-up feedback: `ui/tag_panel.py` now
+has a search-to-filter-or-create box and no modal dialogs, row
+interaction moved into a new `ui/tag_row_delegate.py` (whole-row click
+toggles, hover pencil/trash icons, inline rename via Qt's own editor
+flow), and `main_window.py` splits the old single filter panel into two
+independent, stacked `TagPanel`s (item tags vs. browse filter) with no
+panel left below the viewer. `pytest`/`ruff`/`mypy` were green throughout
+-- the bug below only ever showed up by actually clicking the running app.
+
+**Emitting a signal synchronously from inside `QStyledItemDelegate.editorEvent`,
+when the handler on the other end resets a model, can corrupt an unrelated
+view.** `TagRowDelegate.editorEvent` used to call
+`self.toggle_requested.emit(tag_id)` directly on mouse release. The
+connected handler chain (`TagPanel` -> `MainWindow._on_filter_toggle` ->
+`_refresh_all()`) calls `TagListModel.set_tags()`, which does a
+`beginResetModel()/endResetModel()` -- synchronously, while the view was
+still mid-dispatch of the very mouse event that triggered it. Reproduced
+live: unchecking a filter tag left the *result list* empty and the viewer
+on "No collection open" until an unrelated click elsewhere un-stuck it --
+selecting a **different** tag worked fine, only checked-to-unchecked
+broke, and only via a real click (calling `MainWindow._on_filter_toggle()`
+directly in a test never reproduced it, since that skips `editorEvent`
+entirely). Fixed by deferring the emission a tick via
+`QTimer.singleShot(0, ...)` (`TagRowDelegate._emit_later`), so the click
+event finishes unwinding before anything resets a model. Takeaway: a
+custom delegate that both handles input *and* triggers a model reset
+needs to not do both in the same call stack -- and a passing unit test
+that drives the handler method directly, rather than a real click through
+the delegate, cannot catch this class of reentrancy bug at all.
+
 Two more launch-path notes from Phase 5's computer-use pass, same root
 cause each time (a step that only reveals itself with real interaction,
 not automated assertions):

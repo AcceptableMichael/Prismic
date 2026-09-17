@@ -120,7 +120,7 @@ def test_a_pending_chord_times_out_on_its_own(qtbot: QtBot, window: MainWindow) 
 
 
 def test_global_shortcuts_still_work_when_the_result_list_has_focus(
-    qtbot: QtBot, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+    qtbot: QtBot, window: MainWindow
 ) -> None:
     """Regression test for a bug a computer-use pass caught: QAbstractItemView
     has its own built-in "type to search" behavior that swallows a plain
@@ -128,18 +128,19 @@ def test_global_shortcuts_still_work_when_the_result_list_has_focus(
     on the window itself. Earlier tests all sent keys straight to `window`
     (`qtbot.keyClick(window, ...)`), which never exercised real Qt focus
     routing through a child widget and so never caught this. Fixed by
-    intercepting keys via an application-level event filter instead."""
-    from PySide6.QtWidgets import QInputDialog
+    intercepting keys via an application-level event filter instead.
 
-    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("vacation", True)))
-
+    "n" now focuses the item-tag search box rather than opening a modal
+    dialog (see `KeyboardController`'s `on_create_tag` wiring in
+    `MainWindow`) -- typing a name there and pressing Enter is what
+    actually creates (and applies) the tag, exercised in
+    `test_main_window.py`."""
     window.result_list.setFocus()
     qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
 
     qtbot.keyClick(window.result_list, Qt.Key.Key_N)
 
-    assert window.session is not None
-    assert [t.name for t in window.session.tags.list_all()] == ["vacation"]
+    assert window.item_tag_panel.search_box.hasFocus()
 
 
 def test_navigation_still_works_when_the_result_list_has_focus(

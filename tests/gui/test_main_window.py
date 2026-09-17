@@ -145,6 +145,57 @@ def test_filter_selection_narrows_the_result_view(
     assert window.result_model.rowCount() == 2
 
 
+def test_item_create_and_check_creates_the_tag_and_maps_it_in_one_step(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    _open_and_wait(qtbot, window, collection_dir)
+    current_id = window.session.state.result_set[0]  # type: ignore[union-attr]
+    window.session.state.current_item = current_id  # type: ignore[union-attr]
+    window._refresh_all()
+
+    window._on_item_create_and_check("vacation")
+
+    tags = window.session.tags.list_all()  # type: ignore[union-attr]
+    assert [t.name for t in tags] == ["vacation"]
+    assert [t.id for t in window.session.mappings.tags_for_media(current_id)] == [  # type: ignore[union-attr]
+        tags[0].id
+    ]
+
+
+def test_filter_create_and_check_creates_the_tag_and_activates_the_filter(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    _open_and_wait(qtbot, window, collection_dir)
+
+    window._on_filter_create_and_check("vacation")
+
+    tags = window.session.tags.list_all()  # type: ignore[union-attr]
+    assert [t.name for t in tags] == ["vacation"]
+    assert window.session.state.selected_tag_ids == [tags[0].id]  # type: ignore[union-attr]
+    # Nothing is mapped to any file yet -- creating a tag from the filter
+    # box narrows the browse list, it doesn't tag whatever's on screen.
+    assert window.result_model.rowCount() == 0
+
+
+def test_filter_create_and_check_then_deselect_restores_the_full_list(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    """Mirrors a live computer-use repro: create a tag via the filter
+    search box (narrows to zero, since nothing's mapped to it yet), then
+    toggle it back off and confirm the full list actually comes back --
+    not just that `selected_tag_ids` is empty."""
+    _open_and_wait(qtbot, window, collection_dir)
+
+    window._on_filter_create_and_check("vacation")
+    assert window.result_model.rowCount() == 0
+
+    tag = window.session.tags.list_all()[0]  # type: ignore[union-attr]
+    window._on_filter_toggle(tag.id)
+
+    assert window.session.state.selected_tag_ids == []  # type: ignore[union-attr]
+    assert window.result_model.rowCount() == 2
+
+
 def test_in_viewer_tag_toggle_maps_the_current_item(
     qtbot: QtBot, window: MainWindow, collection_dir: Path
 ) -> None:
