@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <clipPath id="prismic-mountain-clip">
+      <polygon points="100,55 58,150 142,150"/>
+    </clipPath>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="42" fill="#101613" stroke="rgba(255,255,255,0.07)"/>
+  <g clip-path="url(#prismic-mountain-clip)">
+    <polygon points="100,55 58,150 142,150" fill="none" stroke="#EFFFF3" stroke-width="38" opacity="0.10"/>
+    <polygon points="100,55 58,150 142,150" fill="none" stroke="#DFFBE6" stroke-width="22" opacity="0.16"/>
+    <polygon points="100,55 58,150 142,150" fill="none" stroke="#B8F5CB" stroke-width="10" opacity="0.22"/>
+  </g>
+  <polygon points="128,102 188,55 188,70.8" fill="#C9F7D2"/>
+  <polygon points="128,102 188,70.8 188,86.7" fill="#9FEBB8"/>
+  <polygon points="128,102 188,86.7 188,102.5" fill="#74DDA0"/>
+  <polygon points="128,102 188,102.5 188,118.3" fill="#47C98A"/>
+  <polygon points="128,102 188,118.3 188,134.2" fill="#259F73"/>
+  <polygon points="128,102 188,134.2 188,150" fill="#0E7857"/>
+  <polygon points="100,55 58,150 142,150" fill="none" stroke="#DFFBE6" stroke-width="7" stroke-linejoin="round"/>
+  <line x1="18" y1="102" x2="78" y2="102" stroke="#6EE7A6" stroke-width="7" stroke-linecap="round"/>
+</svg>

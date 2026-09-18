@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <clipPath id="prismic-mountain-clip-glyph">
+      <polygon points="100,55 58,150 142,150"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#prismic-mountain-clip-glyph)">
+    <polygon points="100,55 58,150 142,150" fill="none" stroke="currentColor" stroke-width="34" opacity="0.10"/>
+    <polygon points="100,55 58,150 142,150" fill="none" stroke="currentColor" stroke-width="16" opacity="0.20"/>
+  </g>
+  <polygon points="128,102 188,55 188,150" fill="currentColor" opacity="0.82"/>
+  <polygon points="100,55 58,150 142,150" fill="none" stroke="currentColor" stroke-width="9" stroke-linejoin="round"/>
+  <line x1="18" y1="102" x2="78" y2="102" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+</svg>
