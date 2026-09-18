@@ -118,13 +118,26 @@ Unless told otherwise, when given a goal:
 3. For UI/UX changes, launch the app (`uv run prismic`) and use computer-use
    to look at it — take a screenshot, interact with the relevant controls
    (click, type, navigate), confirm it behaves and looks right, not just that
-   it launches without a traceback. Close the app window when done checking.
+   it launches without a traceback.
 4. If verification surfaces a bug or a rough edge, fix it and re-verify.
    Loop this (implement -> run checks -> observe via computer-use -> fix)
    until the goal is actually met, not just attempted once.
 5. Commit at each meaningful checkpoint along the way, not only at the end —
    if the loop gets interrupted, the history should show real progress.
-6. Summarize what changed and how you verified it when you report back.
+6. **After every change is done** (not just a UI/UX one -- any change,
+   whether or not you personally verified it with computer-use), close any
+   running Prismic instance and relaunch it fresh (`uv run prismic`, or with
+   a collection path per the launch-path notes below). Leave that instance
+   running rather than closing it -- the human will likely want to look at
+   the result themselves without having to ask for a relaunch. If a
+   verification pass already opened one, that same instance satisfies this
+   (no need to close-and-reopen again immediately after). If the human's own
+   instance is already open when you start (check `Get-Process`, don't just
+   assume), don't touch it mid-task -- do your own verification in a
+   separate instance against a throwaway collection, and only close/relaunch
+   *their* instance once the change is actually complete, since that's the
+   one they'll look at.
+7. Summarize what changed and how you verified it when you report back.
 
 ## 2026-09-16: computer-use + this app's window — root cause found
 
