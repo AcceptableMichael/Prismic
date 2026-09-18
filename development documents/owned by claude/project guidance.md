@@ -77,11 +77,19 @@ they're used:
 Git is installed standalone (winget, `Git.Git`) and on `PATH`. Global identity
 is already configured — don't change `user.name`/`user.email`.
 
+This applies regardless of where the work came from — the roadmap, a
+computer-use exploration, or an ad hoc request typed straight into a chat
+session that never touched the plan files. "Did this change the repo" is
+what matters, not "was this on the list." A chat-only session that lands a
+verified change and doesn't commit it has left real progress sitting
+uncommitted for no reason.
+
 Workflow expectations:
 
 - **Commit freely and often** as you complete coherent units of work — don't
-  wait for the user to ask. Small, well-scoped commits with clear messages
-  beat one giant commit at the end.
+  wait for the user to ask, and don't wait for a natural end-of-session
+  moment either. Small, well-scoped commits with clear messages beat one
+  giant commit at the end.
 - Write real commit messages: what changed and why, not just "wip" or
   "updates". Group unrelated changes into separate commits.
 - Run `git status` / review the diff before staging broad changes so you
@@ -92,6 +100,11 @@ Workflow expectations:
   anything that touches shared/remote state is not.
 
 ## Working independently
+
+The steps below are the same whether "given a goal" means picking the next
+item off the roadmap or a one-off instruction typed into a chat session with
+no plan behind it at all — an ad hoc request is still real development work
+on this repo and follows this same loop, commits included.
 
 Unless told otherwise, when given a goal:
 
