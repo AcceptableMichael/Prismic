@@ -158,6 +158,8 @@ class MainWindow(QMainWindow):
         self.result_model = ResultListModel(self)
         self.result_list = QListView()
         self.result_list.setObjectName("resultList")
+        # Never horizontal-scroll -- see TagPanel's matching setting for why.
+        self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.result_list.viewport().setMouseTracking(True)
         self.result_list.setModel(self.result_model)
         self._thumbnail_delegate = ThumbnailDelegate(

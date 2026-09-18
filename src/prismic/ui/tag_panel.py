@@ -19,7 +19,7 @@ as a Qt signal; nothing here calls into the application layer directly
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QHoverEvent, QMouseEvent
 from PySide6.QtWidgets import QLabel, QLineEdit, QListView, QVBoxLayout, QWidget
 
@@ -50,6 +50,11 @@ class TagPanel(QWidget):
 
         self.list_view = QListView(self)
         self.list_view.setObjectName("tagList")
+        # Never horizontal-scroll: a row's own text elides to fit instead
+        # (TagRowDelegate), so a horizontal scrollbar here would only ever
+        # be Qt reacting to a sub-pixel width miscalculation, not anything
+        # actually cut off.
+        self.list_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list_view.viewport().setMouseTracking(True)
         self.list_view.viewport().installEventFilter(self)
         self.list_view.setModel(self.model)

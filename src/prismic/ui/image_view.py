@@ -26,6 +26,11 @@ class ImageView(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        # Never horizontal-scroll: hiding the bar doesn't disable panning
+        # (ScrollHandDrag moves the view's scroll position directly), it
+        # just stops a bar from appearing while zoomed in past the
+        # viewport's width.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
     def set_image(self, image: QImage) -> None:
         self._scene.clear()
