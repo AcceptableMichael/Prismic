@@ -19,7 +19,8 @@ as a Qt signal; nothing here calls into the application layer directly
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QEvent, QObject, Signal
+from PySide6.QtGui import QHoverEvent, QMouseEvent
 from PySide6.QtWidgets import QLabel, QLineEdit, QListView, QVBoxLayout, QWidget
 
 from prismic.domain.tag import Tag
@@ -32,6 +33,7 @@ class TagPanel(QWidget):
     create_and_check_requested = Signal(str)  # name -- create the tag, then apply/select it
     rename_requested = Signal(int, str)  # tag_id, new_name
     delete_requested = Signal(int)  # tag_id
+    hover_row_changed = Signal(object)  # int row index, or None when hovering no row
 
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -49,6 +51,7 @@ class TagPanel(QWidget):
         self.list_view = QListView(self)
         self.list_view.setObjectName("tagList")
         self.list_view.viewport().setMouseTracking(True)
+        self.list_view.viewport().installEventFilter(self)
         self.list_view.setModel(self.model)
         delegate = TagRowDelegate(self.list_view, self.list_view)
         delegate.toggle_requested.connect(self.toggle_requested)
@@ -70,6 +73,22 @@ class TagPanel(QWidget):
         self._tags = tags
         self._checked_ids = checked_ids
         self._apply_filter()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self.list_view.viewport():
+            # QAbstractItemView drives its own row-hover repainting (the
+            # rename/delete icons above) off HoverMove, not MouseMove --
+            # mouse-tracking being on doesn't guarantee plain QMouseMove
+            # events reach here too, so both are handled the same way.
+            if isinstance(event, QMouseEvent | QHoverEvent) and event.type() in (
+                QEvent.Type.MouseMove,
+                QEvent.Type.HoverMove,
+            ):
+                index = self.list_view.indexAt(event.position().toPoint())
+                self.hover_row_changed.emit(index.row() if index.isValid() else None)
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                self.hover_row_changed.emit(None)
+        return super().eventFilter(watched, event)
 
     def focus_search(self) -> None:
         self.search_box.setFocus()

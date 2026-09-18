@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeySequence
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -55,6 +56,7 @@ class MediaViewer(QWidget):
 
         self._play_pause_button = QPushButton("Play")
         self._play_pause_button.setObjectName("playPauseButton")
+        self._play_pause_button.setShortcut(QKeySequence(Qt.Key.Key_Space))
         self._play_pause_button.clicked.connect(self.toggle_playback)
         self._seek_slider = QSlider(Qt.Orientation.Horizontal)
         self._seek_slider.setRange(0, 0)
@@ -123,6 +125,10 @@ class MediaViewer(QWidget):
     def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
         is_playing = state == QMediaPlayer.PlaybackState.PlayingState
         self._play_pause_button.setText("Pause" if is_playing else "Play")
+
+    @property
+    def play_pause_button(self) -> QPushButton:
+        return self._play_pause_button
 
     @property
     def image_view(self) -> ImageView:

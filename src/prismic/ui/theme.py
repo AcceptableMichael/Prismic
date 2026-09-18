@@ -111,6 +111,29 @@ QStatusBar {{
     color: {TEXT_SECONDARY};
     border-top: 1px solid {BORDER_SUBTLE};
 }}
+QStatusBar::item {{
+    border: none;
+}}
+
+QLabel#hoverExplainerText {{
+    color: {TEXT_SECONDARY};
+    font-size: 11px;
+}}
+QLabel#keycap {{
+    background: {BG_PANEL_RAISED};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER};
+    border-bottom: 2px solid {BORDER};
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 600;
+}}
+QLabel#transientMessageBar {{
+    color: {TEXT_SECONDARY};
+    font-size: 11px;
+    padding-right: 4px;
+}}
 
 /* -- Panel titles ---------------------------------------------------------- */
 

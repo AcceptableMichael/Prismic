@@ -20,7 +20,7 @@ from PySide6.QtCore import (
     Qt,
     QTimer,
 )
-from PySide6.QtGui import QAction, QCloseEvent, QKeyEvent
+from PySide6.QtGui import QAction, QCloseEvent, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -49,12 +49,15 @@ from prismic.domain.tag import Tag
 from prismic.indexing.reconciler import ReconciliationResult
 from prismic.persistence.errors import CollectionLockedError, PersistenceError
 from prismic.ui.future_watcher import FutureWatcher
+from prismic.ui.hover_explainer_bar import HoverExplainerBar
+from prismic.ui.hover_hint import HoverHintController
 from prismic.ui.instance_bridge import InstanceBridge, request_focus
 from prismic.ui.keyboard import KeyboardController
 from prismic.ui.result_model import MediaIdRole, ResultListModel
 from prismic.ui.tag_panel import TagPanel
 from prismic.ui.thumbnail_delegate import ThumbnailDelegate
 from prismic.ui.thumbnail_provider import ThumbnailProvider
+from prismic.ui.transient_message_bar import TransientMessageBar
 from prismic.ui.viewer import MediaViewer
 
 _Index = QModelIndex | QPersistentModelIndex
@@ -77,6 +80,7 @@ class MainWindow(QMainWindow):
         self._instance_bridge: InstanceBridge | None = None
 
         self._build_ui()
+        self._build_status_bar()
         self._build_menu()
 
         self.keyboard = KeyboardController(
@@ -85,7 +89,7 @@ class MainWindow(QMainWindow):
             on_undo=self._undo,
             on_create_tag=self.item_tag_panel.focus_search,
             on_toggle_tag_by_index=self._toggle_tag_by_index,
-            on_chord_status_changed=self.statusBar().showMessage,
+            on_chord_status_changed=self._transient_bar.show_message,
             parent=self,
         )
         # Installed on the application, not just this window: a normal Qt
@@ -132,6 +136,7 @@ class MainWindow(QMainWindow):
         self.item_tag_panel.create_and_check_requested.connect(self._on_item_create_and_check)
         self.item_tag_panel.rename_requested.connect(self._on_tag_rename)
         self.item_tag_panel.delete_requested.connect(self._on_tag_delete)
+        self.item_tag_panel.hover_row_changed.connect(self._on_item_tag_hover)
 
         self.filter_panel = TagPanel("Filter")
         self.filter_panel.toggle_requested.connect(self._on_filter_toggle)
@@ -179,19 +184,65 @@ class MainWindow(QMainWindow):
         self._central_stack.addWidget(self._splitter)
         self.setCentralWidget(self._central_stack)
 
+    def _build_status_bar(self) -> None:
+        self._hover_bar = HoverExplainerBar()
+        self._transient_bar = TransientMessageBar()
+        # Regular (non-permanent) widget: left-aligned, stretches to fill
+        # whatever space the permanent widget on the right doesn't need --
+        # see HoverExplainerBar's own size policy for what happens when
+        # the two would otherwise overlap.
+        self.statusBar().addWidget(self._hover_bar, 1)
+        # Permanent: right-aligned, always visible -- this is what
+        # replaces QStatusBar's own showMessage() area (see
+        # TransientMessageBar's docstring).
+        self.statusBar().addPermanentWidget(self._transient_bar)
+
+        self._hover_hints = HoverHintController(self._hover_bar, self)
+        self._hover_hints.register_widget(
+            self.viewer.play_pause_button, ("Space",), "Play or pause the video"
+        )
+
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
-        file_menu.addAction("Open Collection Folder…", self._prompt_open_folder)
-        file_menu.addAction("Open .prismic File…", self._prompt_open_file)
+
+        open_folder_action = file_menu.addAction(
+            "Open Collection Folder…", self._prompt_open_folder
+        )
+        open_folder_action.setShortcut(QKeySequence("Ctrl+O"))
+        self._hover_hints.register_action(
+            open_folder_action, file_menu, ("Ctrl", "O"), "Open a folder as a collection"
+        )
+
+        open_file_action = file_menu.addAction("Open .prismic File…", self._prompt_open_file)
+        open_file_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        self._hover_hints.register_action(
+            open_file_action,
+            file_menu,
+            ("Ctrl", "Shift", "O"),
+            "Open an existing .prismic collection file",
+        )
+
         file_menu.addSeparator()
-        file_menu.addAction("Rescan", self._rescan)
+
+        rescan_action = file_menu.addAction("Rescan", self._rescan)
+        rescan_action.setShortcut(QKeySequence("Ctrl+R"))
+        self._hover_hints.register_action(
+            rescan_action, file_menu, ("Ctrl", "R"), "Rescan the collection folder for changes"
+        )
 
         view_menu = self.menuBar().addMenu("&View")
         show_thumbnails_action = QAction("Show Thumbnails", self)
         show_thumbnails_action.setCheckable(True)
         show_thumbnails_action.setChecked(self._thumbnail_delegate.show_thumbnails)
+        show_thumbnails_action.setShortcut(QKeySequence("Ctrl+T"))
         show_thumbnails_action.toggled.connect(self._on_toggle_thumbnails)
         view_menu.addAction(show_thumbnails_action)
+        self._hover_hints.register_action(
+            show_thumbnails_action,
+            view_menu,
+            ("Ctrl", "T"),
+            "Toggle thumbnail previews in the results list",
+        )
 
     # -- Session lifecycle --------------------------------------------------
 
@@ -230,7 +281,7 @@ class MainWindow(QMainWindow):
                 if is_startup:
                     self.close()
                     return
-                self.statusBar().showMessage(
+                self._transient_bar.show_message(
                     "That collection is already open — brought its window to the front.",
                     5000,
                 )
@@ -444,6 +495,16 @@ class MainWindow(QMainWindow):
             self.session.execute(MappingAddCommand(media_id=current, tag_id=tag_id))
         self._refresh_all()
 
+    def _on_item_tag_hover(self, row: int | None) -> None:
+        # Only rows 1-9 have a shortcut at all (the "t" then digit 1-9
+        # chord below only covers that many) -- anything past that has
+        # nothing to show yet, same as a row with no hover at all.
+        if row is None or row >= 9:
+            self._hover_bar.clear()
+            return
+        tag = self.item_tag_panel.model.tag_at(row)
+        self._hover_bar.show_hint(("T", str(row + 1)), f'Toggle "{tag.name}" on the current item')
+
     def _on_item_create_and_check(self, name: str) -> None:
         tag = self._create_tag_and_find(name)
         if tag is not None:
@@ -486,7 +547,7 @@ class MainWindow(QMainWindow):
         self._on_item_tag_toggle(tags[index].id)
 
     def _on_viewer_error(self, reason: str) -> None:
-        self.statusBar().showMessage(f"Could not load media: {reason}", 5000)
+        self._transient_bar.show_message(f"Could not load media: {reason}", 5000)
 
     def _resolve_media_path(self, media_id: int) -> Path | None:
         if self.session is None:

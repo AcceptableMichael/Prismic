@@ -93,7 +93,7 @@ def test_list_all_is_ordered_by_descending_use_count(
 ) -> None:
     rare = repository.create("rare")
     popular = repository.create("popular")
-    unused = repository.create("unused")
+    repository.create("unused")
 
     for path in ("a.jpg", "b.jpg", "c.jpg"):
         migrated_connection.execute(
