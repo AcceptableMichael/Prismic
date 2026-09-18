@@ -87,7 +87,8 @@ class MainWindow(QMainWindow):
             on_navigate_previous=lambda: self._navigate(-1),
             on_navigate_next=lambda: self._navigate(1),
             on_undo=self._undo,
-            on_create_tag=self.item_tag_panel.focus_search,
+            on_focus_item_tags=self.item_tag_panel.focus_search,
+            on_focus_filter=self.filter_panel.focus_search,
             on_toggle_tag_by_index=self._toggle_tag_by_index,
             on_chord_status_changed=self._transient_bar.show_message,
             parent=self,
@@ -131,7 +132,7 @@ class MainWindow(QMainWindow):
         # (an intersection filter). Conflating "check to filter" and
         # "check to tag" into a single list would mean browsing could
         # silently mutate a file's tags -- kept deliberately separate.
-        self.item_tag_panel = TagPanel("Item tags")
+        self.item_tag_panel = TagPanel("Edit this file")
         self.item_tag_panel.toggle_requested.connect(self._on_item_tag_toggle)
         self.item_tag_panel.create_and_check_requested.connect(self._on_item_create_and_check)
         self.item_tag_panel.rename_requested.connect(self._on_tag_rename)
@@ -200,6 +201,14 @@ class MainWindow(QMainWindow):
         self._hover_hints = HoverHintController(self._hover_bar, self)
         self._hover_hints.register_widget(
             self.viewer.play_pause_button, ("Space",), "Play or pause the video"
+        )
+        self._hover_hints.register_widget(
+            self.item_tag_panel.header,
+            ("E",),
+            "Focus the search/create box to tag the current file",
+        )
+        self._hover_hints.register_widget(
+            self.filter_panel.header, ("F",), "Focus the search/create box to filter by tag"
         )
 
     def _build_menu(self) -> None:

@@ -62,11 +62,22 @@ class TagPanel(QWidget):
         title_label = QLabel(title.upper())
         title_label.setObjectName("panelTitle")
 
+        # Title + search box grouped into one widget so the hover-explainer
+        # (see HoverHintController in main_window.py) can treat them as a
+        # single hoverable target for this panel's focus shortcut, rather
+        # than just the search box itself.
+        self.header = QWidget(self)
+        self.header.setObjectName("tagPanelHeader")
+        header_layout = QVBoxLayout(self.header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
+        header_layout.addWidget(title_label)
+        header_layout.addWidget(self.search_box)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(title_label)
-        layout.addWidget(self.search_box)
+        layout.addWidget(self.header)
         layout.addWidget(self.list_view, 1)
 
     def set_tags(self, tags: list[Tag], checked_ids: frozenset[int]) -> None:

@@ -124,23 +124,30 @@ def test_global_shortcuts_still_work_when_the_result_list_has_focus(
 ) -> None:
     """Regression test for a bug a computer-use pass caught: QAbstractItemView
     has its own built-in "type to search" behavior that swallows a plain
-    letter key like "n" before it would ever reach a keyPressEvent override
+    letter key like "e" before it would ever reach a keyPressEvent override
     on the window itself. Earlier tests all sent keys straight to `window`
     (`qtbot.keyClick(window, ...)`), which never exercised real Qt focus
     routing through a child widget and so never caught this. Fixed by
     intercepting keys via an application-level event filter instead.
 
-    "n" now focuses the item-tag search box rather than opening a modal
-    dialog (see `KeyboardController`'s `on_create_tag` wiring in
-    `MainWindow`) -- typing a name there and pressing Enter is what
-    actually creates (and applies) the tag, exercised in
-    `test_main_window.py`."""
+    "e" focuses the item-tag ("Edit this file") search box, "f" focuses
+    the filter search box (see `KeyboardController`'s `on_focus_item_tags`/
+    `on_focus_filter` wiring in `MainWindow`) -- typing a name there and
+    pressing Enter is what actually creates (and applies) the tag,
+    exercised in `test_main_window.py`."""
     window.result_list.setFocus()
     qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
 
-    qtbot.keyClick(window.result_list, Qt.Key.Key_N)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_E)
 
     assert window.item_tag_panel.search_box.hasFocus()
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_F)
+
+    assert window.filter_panel.search_box.hasFocus()
 
 
 def test_navigation_still_works_when_the_result_list_has_focus(

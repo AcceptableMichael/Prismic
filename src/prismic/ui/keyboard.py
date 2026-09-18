@@ -39,7 +39,8 @@ class KeyboardController(QObject):
         on_navigate_previous: Callable[[], None],
         on_navigate_next: Callable[[], None],
         on_undo: Callable[[], None],
-        on_create_tag: Callable[[], None],
+        on_focus_item_tags: Callable[[], None],
+        on_focus_filter: Callable[[], None],
         on_toggle_tag_by_index: Callable[[int], None],
         on_chord_status_changed: Callable[[str], None],
         parent: QObject | None = None,
@@ -53,7 +54,8 @@ class KeyboardController(QObject):
         self._on_navigate_previous = on_navigate_previous
         self._on_navigate_next = on_navigate_next
         self._on_undo = on_undo
-        self._on_create_tag = on_create_tag
+        self._on_focus_item_tags = on_focus_item_tags
+        self._on_focus_filter = on_focus_filter
         self._on_toggle_tag_by_index = on_toggle_tag_by_index
         self._on_chord_status_changed = on_chord_status_changed
 
@@ -98,8 +100,11 @@ class KeyboardController(QObject):
         if event.key == "Ctrl+Z":
             self._on_undo()
             return True
-        if event.key == "n":
-            self._on_create_tag()
+        if event.key == "e":
+            self._on_focus_item_tags()
+            return True
+        if event.key == "f":
+            self._on_focus_filter()
             return True
         if event.key == "t":
             self._chord.press("t")
