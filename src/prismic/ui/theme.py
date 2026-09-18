@@ -115,6 +115,15 @@ QStatusBar::item {{
     border: none;
 }}
 
+/* Both sides of the status bar are pinned to the same fixed height,
+   regardless of what they currently contain -- a keycap's border and
+   padding make it taller than a plain text label, so without a floor
+   here the whole bar visibly grows/shrinks by a couple of pixels
+   every time a hovered control's hint (or the transient message) comes
+   and goes. */
+QWidget#hoverExplainerBar, QLabel#transientMessageBar {{
+    min-height: 22px;
+}}
 QLabel#hoverExplainerText {{
     color: {TEXT_SECONDARY};
     font-size: 11px;
