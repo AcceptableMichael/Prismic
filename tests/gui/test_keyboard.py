@@ -42,6 +42,58 @@ def test_left_arrow_navigates_to_the_previous_item(qtbot: QtBot, window: MainWin
     assert session.state.current_item == first_id
 
 
+def test_down_arrow_navigates_to_the_next_item(qtbot: QtBot, window: MainWindow) -> None:
+    session = window.session
+    assert session is not None
+    first_id, second_id = session.state.result_set
+    session.state.current_item = first_id
+    window._sync_result_selection()
+
+    qtbot.keyClick(window, Qt.Key.Key_Down)
+
+    assert session.state.current_item == second_id
+
+
+def test_up_arrow_navigates_to_the_previous_item(qtbot: QtBot, window: MainWindow) -> None:
+    session = window.session
+    assert session is not None
+    first_id, second_id = session.state.result_set
+    session.state.current_item = second_id
+    window._sync_result_selection()
+
+    qtbot.keyClick(window, Qt.Key.Key_Up)
+
+    assert session.state.current_item == first_id
+
+
+def test_up_down_navigate_even_while_a_tag_search_box_has_focus(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    """Unlike every other global shortcut, Up/Down deliberately aren't
+    exempted while text-editing has focus -- they have no meaning in a
+    single-line box (unlike Left/Right, which move the caret), so result-
+    list navigation should stay reachable no matter where the caret is."""
+    session = window.session
+    assert session is not None
+    first_id, second_id = session.state.result_set
+    session.state.current_item = first_id
+    window._sync_result_selection()
+
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.item_tag_panel.search_box, Qt.Key.Key_Down)
+    assert session.state.current_item == second_id
+
+    qtbot.keyClick(window.item_tag_panel.search_box, Qt.Key.Key_Up)
+    assert session.state.current_item == first_id
+
+    # A plain letter, by contrast, must still land in the box as text --
+    # confirms the exemption is narrowly scoped to Up/Down, not blanket.
+    qtbot.keyClick(window.item_tag_panel.search_box, Qt.Key.Key_A)
+    assert window.item_tag_panel.search_box.text() == "a"
+
+
 def test_navigation_does_not_go_past_the_ends(qtbot: QtBot, window: MainWindow) -> None:
     session = window.session
     assert session is not None

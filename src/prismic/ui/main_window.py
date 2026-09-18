@@ -579,9 +579,10 @@ class MainWindow(QMainWindow):
         if (
             event.type() == QEvent.Type.KeyPress
             and self.session is not None
-            and not self._focus_is_text_editing()
             and isinstance(event, QKeyEvent)
-            and self.keyboard.handle_key_press(event)
+            and self.keyboard.handle_key_press(
+                event, text_editing=self._focus_is_text_editing()
+            )
         ):
             event.accept()
             return True

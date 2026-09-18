@@ -2,10 +2,14 @@
 
 Text-editing precedence is handled by Qt's own focus system, not
 reimplemented here: a focused `QLineEdit`/`QInputDialog` receives key events
-directly, so this controller's `handle_key_press` never even runs for those
-keys — Qt delivers input to whatever's focused first, before it would ever
-reach the main window. What's left to arbitrate is chord state
-(`LOCAL_MODAL`) versus plain navigation/commands (`GLOBAL_COMMAND`) — a
+directly, so this controller's `handle_key_press` never runs the rest of its
+dispatch for those keys -- Qt delivers input to whatever's focused first,
+before it would ever reach the main window. The one deliberate exception is
+Up/Down: they have no meaning in a single-line text field (unlike Left/
+Right, which move the caret), so result-list navigation stays reachable
+even while a tag search/rename box has focus -- see the `text_editing`
+branch below. What's left to arbitrate for everything else is chord state
+(`LOCAL_MODAL`) versus plain navigation/commands (`GLOBAL_COMMAND`) -- a
 separate `VIEWER` context isn't needed in practice yet, since nothing here
 has viewer-specific keys that would conflict with a global one.
 """
@@ -63,11 +67,26 @@ class KeyboardController(QObject):
         self._resolver.register(InputContext.LOCAL_MODAL, self._handle_chord_key)
         self._resolver.register(InputContext.GLOBAL_COMMAND, self._handle_global_key)
 
-    def handle_key_press(self, event: QKeyEvent) -> bool:
+    def handle_key_press(self, event: QKeyEvent, *, text_editing: bool) -> bool:
         """Returns True if the event was consumed — the caller should
-        `event.accept()` and not pass it on to base-class handling."""
+        `event.accept()` and not pass it on to base-class handling.
+
+        `text_editing` is whether a text-entry widget currently has focus
+        (a tag search/create box, an inline rename editor, ...). While
+        true, everything except Up/Down is left alone entirely so normal
+        typing works -- Up/Down are handled directly, ahead of the chord/
+        global resolver, since result-list navigation should work no
+        matter where the caret is."""
         key_text = _key_text(event)
         if key_text is None:
+            return False
+        if text_editing:
+            if key_text == "Up":
+                self._on_navigate_previous()
+                return True
+            if key_text == "Down":
+                self._on_navigate_next()
+                return True
             return False
         return self._resolver.dispatch(InputEvent(key=key_text))
 
@@ -91,10 +110,10 @@ class KeyboardController(QObject):
         return True
 
     def _handle_global_key(self, event: InputEvent) -> bool:
-        if event.key == "Left":
+        if event.key in ("Left", "Up"):
             self._on_navigate_previous()
             return True
-        if event.key == "Right":
+        if event.key in ("Right", "Down"):
             self._on_navigate_next()
             return True
         if event.key == "Ctrl+Z":
@@ -141,6 +160,10 @@ def _key_text(event: QKeyEvent) -> str | None:
         return "Left"
     if key == Qt.Key.Key_Right:
         return "Right"
+    if key == Qt.Key.Key_Up:
+        return "Up"
+    if key == Qt.Key.Key_Down:
+        return "Down"
     if key == Qt.Key.Key_Escape:
         return "Escape"
     if key == Qt.Key.Key_Z and modifiers & Qt.KeyboardModifier.ControlModifier:
