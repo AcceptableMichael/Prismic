@@ -12,7 +12,7 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QSize
+from PySide6.QtCore import QBuffer, QIODevice, QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
@@ -38,7 +38,7 @@ def render_png(renderer: QSvgRenderer, size: int) -> bytes:
     buffer = QBuffer()
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     pixmap.save(buffer, "PNG")
-    data = bytes(buffer.data())
+    data: bytes = bytes(buffer.data().data())
     buffer.close()
     return data
 

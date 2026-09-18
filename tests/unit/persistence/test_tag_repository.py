@@ -101,9 +101,7 @@ def test_list_all_is_ordered_by_descending_use_count(
             "VALUES ('h', ?, 0, 0, 'present')",
             (path,),
         )
-    media_ids = [
-        row[0] for row in migrated_connection.execute("SELECT id FROM media").fetchall()
-    ]
+    media_ids = [row[0] for row in migrated_connection.execute("SELECT id FROM media").fetchall()]
     migrated_connection.executemany(
         "INSERT INTO media_tags (media_id, tag_id) VALUES (?, ?)",
         [(media_ids[0], rare.id), *((mid, popular.id) for mid in media_ids)],

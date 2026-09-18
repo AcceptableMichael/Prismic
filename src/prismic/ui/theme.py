@@ -30,15 +30,19 @@ TEXT_PRIMARY = "#e8e9ec"
 TEXT_SECONDARY = "#9a9ea6"
 TEXT_MUTED = "#6b6f78"
 
-ACCENT = "#5b93f5"
-ACCENT_HOVER = "#75a5f7"
+ACCENT = "#6ee7a6"  # matches assets/icon/prismic-icon.svg's own accent
+# stroke exactly, rather than picking an unrelated green -- the app icon
+# was already green before this file was (see prismic-icon.svg), so this
+# is the fix for that inconsistency, not a new color introduced alongside it.
+ACCENT_HOVER = "#9febb8"  # one step up the icon's own gradient, not a
+# freehand tint -- same palette, not just the same hue.
 # Qt's hex-with-alpha format is #AARRGGBB (alpha *first*) for both QColor and
 # QSS -- not the CSS-web convention of alpha last. Get this backwards and the
 # alpha nibbles get read as part of the RGB value instead, producing a wrong,
 # fully-opaque color rather than an error (that's how a "20% blue" wash
 # turned into solid yellow-green here the first time around).
-ACCENT_MUTED = "#335b93f5"  # ~20% alpha, for selection washes
-ACCENT_MUTED_STRONG = "#555b93f5"
+ACCENT_MUTED = "#336ee7a6"  # ~20% alpha, for selection washes
+ACCENT_MUTED_STRONG = "#556ee7a6"
 
 DANGER = "#e5697a"
 DANGER_MUTED = "#26e5697a"
