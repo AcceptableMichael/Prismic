@@ -47,5 +47,17 @@ class TagRepository:
         return Tag(id=row["id"], name=row["name"]) if row is not None else None
 
     def list_all(self) -> list[Tag]:
-        rows = self._connection.execute("SELECT id, name FROM tags ORDER BY name").fetchall()
+        # Most-used tags first -- what the user reaches for again is what
+        # should be nearest the top, in both the filter panel and the
+        # per-item tag panel (both list views share this one ordering).
+        # Name is only the tie-break for tags with equal (often zero) use.
+        rows = self._connection.execute(
+            """
+            SELECT tags.id, tags.name, COUNT(media_tags.media_id) AS use_count
+            FROM tags
+            LEFT JOIN media_tags ON media_tags.tag_id = tags.id
+            GROUP BY tags.id
+            ORDER BY use_count DESC, tags.name
+            """
+        ).fetchall()
         return [Tag(id=row["id"], name=row["name"]) for row in rows]

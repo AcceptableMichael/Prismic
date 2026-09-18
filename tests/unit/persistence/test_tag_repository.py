@@ -78,9 +78,35 @@ def test_get_returns_none_for_unknown_id(repository: TagRepository) -> None:
     assert repository.get(999) is None
 
 
-def test_list_all_is_ordered_by_name(repository: TagRepository) -> None:
+def test_list_all_breaks_ties_by_name(repository: TagRepository) -> None:
+    # None of these are used by any media, so they're all tied on use
+    # count -- the name is what orders them in that case.
     repository.create("zebra")
     repository.create("apple")
     repository.create("mango")
 
     assert [tag.name for tag in repository.list_all()] == ["apple", "mango", "zebra"]
+
+
+def test_list_all_is_ordered_by_descending_use_count(
+    repository: TagRepository, migrated_connection: sqlite3.Connection
+) -> None:
+    rare = repository.create("rare")
+    popular = repository.create("popular")
+    unused = repository.create("unused")
+
+    for path in ("a.jpg", "b.jpg", "c.jpg"):
+        migrated_connection.execute(
+            "INSERT INTO media (content_hash, relative_path, size, mtime, state) "
+            "VALUES ('h', ?, 0, 0, 'present')",
+            (path,),
+        )
+    media_ids = [
+        row[0] for row in migrated_connection.execute("SELECT id FROM media").fetchall()
+    ]
+    migrated_connection.executemany(
+        "INSERT INTO media_tags (media_id, tag_id) VALUES (?, ?)",
+        [(media_ids[0], rare.id), *((mid, popular.id) for mid in media_ids)],
+    )
+
+    assert [tag.name for tag in repository.list_all()] == ["popular", "rare", "unused"]
