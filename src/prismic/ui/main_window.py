@@ -311,10 +311,14 @@ class MainWindow(QMainWindow):
 
     # -- Refreshing the UI from session state --------------------------------
 
+    def _ordered_tags(self) -> list[Tag]:
+        assert self.session is not None
+        return self.session.tag_recency.order(self.session.tags.list_all())
+
     def _refresh_all(self) -> None:
         if self.session is None:
             return
-        tags = self.session.tags.list_all()
+        tags = self._ordered_tags()
         self.filter_panel.set_tags(tags, frozenset(self.session.state.selected_tag_ids))
 
         media_list = eligible_media(
@@ -367,7 +371,7 @@ class MainWindow(QMainWindow):
             return
         self.session.state.current_item = media_id
         self._show_current_media()
-        self._refresh_item_tag_panel(self.session.tags.list_all())
+        self._refresh_item_tag_panel(self._ordered_tags())
 
     def _navigate(self, delta: int) -> None:
         if self.session is None:
@@ -384,7 +388,7 @@ class MainWindow(QMainWindow):
         self.session.state.current_item = result_set[new_index]
         self._sync_result_selection()
         self._show_current_media()
-        self._refresh_item_tag_panel(self.session.tags.list_all())
+        self._refresh_item_tag_panel(self._ordered_tags())
 
     def _undo(self) -> None:
         if self.session is None:
@@ -395,6 +399,7 @@ class MainWindow(QMainWindow):
     def _on_filter_toggle(self, tag_id: int) -> None:
         if self.session is None:
             return
+        self.session.tag_recency.record_click(tag_id)
         if tag_id in self.session.state.selected_tag_ids:
             self.session.execute(FilterDeselectCommand(tag_id=tag_id))
         else:
@@ -431,6 +436,7 @@ class MainWindow(QMainWindow):
         current = self.session.state.current_item
         if current is None:
             return
+        self.session.tag_recency.record_click(tag_id)
         mapped_ids = {t.id for t in self.session.mappings.tags_for_media(current)}
         if tag_id in mapped_ids:
             self.session.execute(MappingRemoveCommand(media_id=current, tag_id=tag_id))

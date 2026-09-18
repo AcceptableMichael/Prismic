@@ -215,3 +215,24 @@ def test_in_viewer_tag_toggle_maps_the_current_item(
     window._on_item_tag_toggle(tag.id)  # toggle back off
 
     assert window.session.mappings.tags_for_media(current_id) == []  # type: ignore[union-attr]
+
+
+def test_recently_clicked_tag_floats_to_the_top_of_both_panels(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    _open_and_wait(qtbot, window, collection_dir)
+    window._on_tag_create("alpha")
+    window._on_tag_create("beta")
+    current_id = window.session.state.result_set[0]  # type: ignore[union-attr]
+    window.session.state.current_item = current_id  # type: ignore[union-attr]
+    window._refresh_all()
+    tags_by_name = {t.name: t.id for t in window.session.tags.list_all()}  # type: ignore[union-attr]
+
+    # Alphabetically/popularity "alpha" already sorts first; click "beta"
+    # from the filter panel and it should jump ahead of "alpha" in *both*
+    # list views, since they share one underlying recency ordering.
+    window._on_filter_toggle(tags_by_name["beta"])
+    window._on_filter_toggle(tags_by_name["beta"])  # deselect again, click still counts
+
+    assert window.filter_panel.model.tag_at(0).name == "beta"
+    assert window.item_tag_panel.model.tag_at(0).name == "beta"

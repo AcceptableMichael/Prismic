@@ -18,6 +18,7 @@ from prismic.application.commands.base import Command
 from prismic.application.dispatcher import CommandDispatcher
 from prismic.application.history import History
 from prismic.application.state import ApplicationState
+from prismic.application.tag_recency import TagRecencyTracker
 from prismic.application.worker_pool import WorkerPool
 from prismic.domain.collection import Collection
 from prismic.indexing.reconciler import Reconciler, ReconciliationResult, run_reconciliation
@@ -45,6 +46,7 @@ class PrismicSession:
         self.media = MediaRepository(opened.connection)
         self.mappings = MappingRepository(opened.connection)
         self.state = ApplicationState()
+        self.tag_recency = TagRecencyTracker()
         self.history = History()
         self.dispatcher = CommandDispatcher(
             opened.connection, self.state, self.tags, self.media, self.mappings, self.history
