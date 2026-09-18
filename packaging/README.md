@@ -34,17 +34,26 @@ Evaluated PyInstaller, Nuitka, and Briefcase. Picked **PyInstaller**:
 
 ```powershell
 # From the repo root, using the project's normal uv-managed venv:
-uv run pyinstaller packaging/prismic.spec --noconfirm
+uv run prismic-build-exe
 
-# Or, if pyinstaller isn't installed in your active venv (e.g. because
-# another process has the venv's own prismic.exe launcher script locked --
-# see the note below), build from an isolated venv instead:
+# Or, if that fails because another process has the venv's own
+# prismic.exe launcher script locked -- see the note below -- build
+# from an isolated venv instead:
 uv venv .venv-build
 $env:UV_PROJECT_ENVIRONMENT = ".venv-build"
 uv sync --group dev
+prismic-build-exe
 $env:UV_PROJECT_ENVIRONMENT = $null
-.\.venv-build\Scripts\pyinstaller.exe packaging/prismic.spec --noconfirm
 ```
+
+`prismic-build-exe` and `prismic-installer` (below) are `[project.scripts]`
+entry points defined in `pyproject.toml`, backed by
+[`src/prismic/_packaging.py`](../src/prismic/_packaging.py) -- uv itself has
+no separate task-runner/scripts feature, but any console-script entry point
+is invocable as `uv run <name>` the same way `uv run prismic` launches the
+app itself. They just wrap the underlying `pyinstaller`/`ISCC.exe`
+invocations shown historically below, so you don't need to remember the
+exact spec path or where Inno Setup installs itself.
 
 Output: `dist\prismic.exe` -- a single self-contained executable, no
 Python install required on the target machine. ~49MB with UPX compression
@@ -118,8 +127,13 @@ For an actual installer rather than a portable exe --
 JRSoftware.InnoSetup`):
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" packaging\windows\prismic.iss
+uv run prismic-installer
 ```
+
+(equivalent to `& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+packaging\windows\prismic.iss` -- `prismic-installer` just locates
+`ISCC.exe` on `PATH` or at that default install location for you, and
+errors with the `winget install` hint above if it can't find it)
 
 Output: `dist\PrismicSetup.exe`. Per-user install (`PrivilegesRequired=lowest`
 -- installs under `%LOCALAPPDATA%\Programs\Prismic`, no admin/UAC prompt),

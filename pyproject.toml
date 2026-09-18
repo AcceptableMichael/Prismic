@@ -10,6 +10,8 @@ dependencies = [
 
 [project.scripts]
 prismic = "prismic.__main__:main"
+prismic-build-exe = "prismic._packaging:build_exe"
+prismic-installer = "prismic._packaging:build_installer"
 
 [build-system]
 requires = ["hatchling"]

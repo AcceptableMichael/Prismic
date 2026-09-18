@@ -49,6 +49,7 @@ OutputBaseFilename=PrismicSetup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\..\src\prismic\assets\icon\prismic.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Skip the "Ready to Install" confirmation and "Completing the Setup

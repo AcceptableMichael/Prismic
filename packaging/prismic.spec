@@ -31,11 +31,13 @@ multimedia_plugins = [
     for name in os.listdir(multimedia_plugin_dir)
 ]
 
+app_icon = os.path.join("..", "src", "prismic", "assets", "icon", "prismic.ico")
+
 a = Analysis(
     ["../src/prismic/__main__.py"],
     pathex=["../src"],
     binaries=multimedia_plugins,
-    datas=[],
+    datas=[(app_icon, os.path.join("prismic", "assets", "icon"))],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -67,4 +69,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=app_icon,
 )

@@ -33,3 +33,24 @@ Lint and type-check:
 uv run ruff check .
 uv run mypy .
 ```
+
+## Packaging a Windows installer
+
+See [`packaging/README.md`](packaging/README.md) for the full details, but
+in short:
+
+```powershell
+# 1. Build the self-contained exe
+uv run prismic-build-exe
+
+# 2. Wrap it in a Windows installer (requires Inno Setup:
+#    winget install JRSoftware.InnoSetup)
+uv run prismic-installer
+```
+
+Output: `dist\PrismicSetup.exe` -- a per-user installer with a Start Menu
+entry, optional desktop icon, uninstaller, and `.prismic` file-association
+registration built in. `packaging/README.md` also covers building from an
+isolated venv (needed if the dev venv's own `prismic.exe` is locked by a
+running instance), verifying the build, and the portable-exe-only
+alternative.
