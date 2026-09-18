@@ -41,8 +41,18 @@ ACCENT_HOVER = "#637669"  # the icon's next gradient step (#9febb8), muted
 # alpha nibbles get read as part of the RGB value instead, producing a wrong,
 # fully-opaque color rather than an error (that's how a "20% blue" wash
 # turned into solid yellow-green here the first time around).
-ACCENT_MUTED = "#33557463"  # ~20% alpha, for selection washes
+ACCENT_MUTED = "#33557463"  # ~20% alpha; menu-item highlight, not selection
 ACCENT_MUTED_STRONG = "#55557463"
+
+# The tag-checked and current-item indicators are deliberately grayscale --
+# neutral, not tinted with the brand accent -- so they read as "selection",
+# a distinct concept from "accent". SELECTED_MARK reuses TEXT_PRIMARY rather
+# than a new hex: it's already the palette's brightest neutral, so a filled
+# checkbox or the current-item bar reads clearly against BG_APP without
+# introducing a color that means nothing else in this file.
+SELECTED_MARK = TEXT_PRIMARY
+SELECTED_WASH = "#26ffffff"  # ~15% white -- stronger than HOVER_WASH so a
+# selected row still reads as distinct from a merely-hovered one.
 
 DANGER = "#e5697a"
 DANGER_MUTED = "#26e5697a"

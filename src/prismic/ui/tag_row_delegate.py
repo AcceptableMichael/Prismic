@@ -97,7 +97,7 @@ class TagRowDelegate(QStyledItemDelegate):
 
         rect = option.rect
         if checked:
-            painter.fillRect(rect, QColor(theme.ACCENT_MUTED))
+            painter.fillRect(rect, QColor(theme.SELECTED_WASH))
         elif hovered:
             painter.fillRect(rect, QColor(theme.HOVER_WASH))
 
@@ -112,7 +112,7 @@ class TagRowDelegate(QStyledItemDelegate):
             4,
         )
         if checked:
-            painter.fillPath(checkbox_path, QColor(theme.ACCENT))
+            painter.fillPath(checkbox_path, QColor(theme.SELECTED_MARK))
         else:
             painter.setPen(QPen(QColor(theme.BORDER), 1.5))
             painter.drawPath(checkbox_path)

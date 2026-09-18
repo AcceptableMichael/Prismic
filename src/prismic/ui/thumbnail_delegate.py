@@ -74,8 +74,8 @@ class ThumbnailDelegate(QStyledItemDelegate):
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
 
         if selected:
-            painter.fillRect(rect, QColor(theme.ACCENT_MUTED))
-            painter.fillRect(rect.x(), rect.y(), 3, rect.height(), QColor(theme.ACCENT))
+            painter.fillRect(rect, QColor(theme.SELECTED_WASH))
+            painter.fillRect(rect.x(), rect.y(), 3, rect.height(), QColor(theme.SELECTED_MARK))
         elif hovered:
             painter.fillRect(rect, QColor(theme.HOVER_WASH))
 
