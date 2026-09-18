@@ -11,7 +11,15 @@ from __future__ import annotations
 from concurrent.futures import Future
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QModelIndex, QObject, QPersistentModelIndex, Qt, QTimer
+from PySide6.QtCore import (
+    QEvent,
+    QModelIndex,
+    QObject,
+    QPersistentModelIndex,
+    QSettings,
+    Qt,
+    QTimer,
+)
 from PySide6.QtGui import QAction, QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -57,6 +65,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Prismic")
         self.resize(1280, 800)
+        saved_geometry = QSettings().value("window/geometry")
+        if saved_geometry is not None:
+            self.restoreGeometry(saved_geometry)
+        else:
+            # No prior session to restore -- maximized is the sane default
+            # rather than the arbitrary 1280x800 fallback size above.
+            self.showMaximized()
         self.session: PrismicSession | None = None
         self._future_watchers: list[FutureWatcher] = []
         self._instance_bridge: InstanceBridge | None = None
@@ -282,6 +297,7 @@ class MainWindow(QMainWindow):
         self._refresh_all()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        QSettings().setValue("window/geometry", self.saveGeometry())
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)

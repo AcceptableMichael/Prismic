@@ -33,6 +33,8 @@ def run(argv: list[str] | None = None) -> int:
     # file once Phase 7 registers the file association (see
     # requirements-amendments.md).
     app = QApplication(args)
+    app.setOrganizationName("Prismic")
+    app.setApplicationName("Prismic")
     app.setWindowIcon(QIcon(str(ICON_PATH)))
     app.setStyleSheet(STYLESHEET)
     initial_path = Path(args[1]) if len(args) > 1 else None
