@@ -78,6 +78,11 @@ class MainWindow(QMainWindow):
         self.session: PrismicSession | None = None
         self._future_watchers: list[FutureWatcher] = []
         self._instance_bridge: InstanceBridge | None = None
+        # See _stable_item_tags(): the item-tag panel's checked-group
+        # ordering for whichever file is current, held stable across
+        # add/remove until that file changes.
+        self._item_tag_order: list[int] = []
+        self._item_tag_order_item_id: int | None = None
 
         self._build_ui()
         self._build_status_bar()
@@ -397,9 +402,36 @@ class MainWindow(QMainWindow):
         current = self.session.state.current_item
         if current is None:
             self.item_tag_panel.set_tags(tags, frozenset())
+            self._item_tag_order = []
+            self._item_tag_order_item_id = None
             return
         mapped_ids = frozenset(t.id for t in self.session.mappings.tags_for_media(current))
-        self.item_tag_panel.set_tags(tags, mapped_ids)
+        self.item_tag_panel.set_tags(self._stable_item_tags(tags, mapped_ids, current), mapped_ids)
+
+    def _stable_item_tags(
+        self, tags: list[Tag], mapped_ids: frozenset[int], current_item: int
+    ) -> list[Tag]:
+        """Reorders `tags` so the checked (mapped-to-`current_item`) subset
+        follows a stable, manually-maintained order instead of the
+        popularity/recency algorithm: checking a tag appends it to the
+        bottom of that group, unchecking one just drops it out -- neither
+        perturbs where the rest sit. That stable order is only rebuilt from
+        the algorithmic order when `current_item` differs from the last
+        call, i.e. the panel is loading a different file."""
+        if current_item != self._item_tag_order_item_id:
+            self._item_tag_order = [t.id for t in tags if t.id in mapped_ids]
+            self._item_tag_order_item_id = current_item
+        else:
+            self._item_tag_order = [tid for tid in self._item_tag_order if tid in mapped_ids]
+            already_ordered = set(self._item_tag_order)
+            self._item_tag_order += [
+                t.id for t in tags if t.id in mapped_ids and t.id not in already_ordered
+            ]
+
+        by_id = {t.id: t for t in tags}
+        stable_checked = [by_id[tid] for tid in self._item_tag_order if tid in by_id]
+        rest = [t for t in tags if t.id not in mapped_ids]
+        return stable_checked + rest
 
     def _sync_result_selection(self) -> None:
         assert self.session is not None

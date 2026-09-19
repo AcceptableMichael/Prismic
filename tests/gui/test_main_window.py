@@ -236,3 +236,74 @@ def test_recently_clicked_tag_floats_to_the_top_of_both_panels(
 
     assert window.filter_panel.model.tag_at(0).name == "beta"
     assert window.item_tag_panel.model.tag_at(0).name == "beta"
+
+
+def test_checking_a_tag_appends_it_to_the_bottom_of_the_checked_group(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    """Checking "alpha" after "gamma" should leave gamma on top -- the
+    popularity/recency algorithm would in fact put alpha first (it's the
+    more recently clicked one), so this only passes if checking really is
+    appending to a stable order rather than re-running that algorithm."""
+    _open_and_wait(qtbot, window, collection_dir)
+    window._on_tag_create("alpha")
+    window._on_tag_create("beta")
+    window._on_tag_create("gamma")
+    current_id = window.session.state.result_set[0]  # type: ignore[union-attr]
+    window.session.state.current_item = current_id  # type: ignore[union-attr]
+    window._refresh_all()
+    tags_by_name = {t.name: t.id for t in window.session.tags.list_all()}  # type: ignore[union-attr]
+
+    window._on_item_tag_toggle(tags_by_name["gamma"])
+    window._on_item_tag_toggle(tags_by_name["alpha"])
+
+    assert window.item_tag_panel.model.tag_at(0).name == "gamma"
+    assert window.item_tag_panel.model.tag_at(1).name == "alpha"
+
+
+def test_unchecking_a_tag_drops_it_without_reordering_the_rest(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    _open_and_wait(qtbot, window, collection_dir)
+    window._on_tag_create("alpha")
+    window._on_tag_create("beta")
+    window._on_tag_create("gamma")
+    current_id = window.session.state.result_set[0]  # type: ignore[union-attr]
+    window.session.state.current_item = current_id  # type: ignore[union-attr]
+    window._refresh_all()
+    tags_by_name = {t.name: t.id for t in window.session.tags.list_all()}  # type: ignore[union-attr]
+
+    window._on_item_tag_toggle(tags_by_name["gamma"])
+    window._on_item_tag_toggle(tags_by_name["alpha"])
+    window._on_item_tag_toggle(tags_by_name["beta"])
+    # stable order is now gamma, alpha, beta -- uncheck the middle one
+    window._on_item_tag_toggle(tags_by_name["alpha"])
+
+    assert window.item_tag_panel.model.tag_at(0).name == "gamma"
+    assert window.item_tag_panel.model.tag_at(1).name == "beta"
+
+
+def test_switching_files_resorts_the_checked_group_by_the_usual_algorithm(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    _open_and_wait(qtbot, window, collection_dir)
+    window._on_tag_create("alpha")
+    window._on_tag_create("gamma")
+    first_id, second_id = window.session.state.result_set  # type: ignore[union-attr]
+    window.session.state.current_item = first_id  # type: ignore[union-attr]
+    window._refresh_all()
+    tags_by_name = {t.name: t.id for t in window.session.tags.list_all()}  # type: ignore[union-attr]
+
+    window._on_item_tag_toggle(tags_by_name["gamma"])
+    window._on_item_tag_toggle(tags_by_name["alpha"])
+    assert window.item_tag_panel.model.tag_at(0).name == "gamma"  # stable append order
+
+    # Switch to the other file and back -- reloading file 1 again should
+    # re-sort it by the usual (recency) algorithm, which puts alpha first
+    # since it was clicked more recently than gamma.
+    window.session.state.current_item = second_id  # type: ignore[union-attr]
+    window._refresh_all()
+    window.session.state.current_item = first_id  # type: ignore[union-attr]
+    window._refresh_all()
+
+    assert window.item_tag_panel.model.tag_at(0).name == "alpha"
