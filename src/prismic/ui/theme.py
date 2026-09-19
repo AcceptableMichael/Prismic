@@ -44,6 +44,8 @@ ACCENT_HOVER = "#637669"  # the icon's next gradient step (#9febb8), muted
 ACCENT_MUTED = "#33557463"  # ~20% alpha; menu-item highlight, not selection
 ACCENT_MUTED_STRONG = "#55557463"
 
+KEYCAP_BORDER = "#2f8f57"  # saturated green, darker than the first pass
+
 # The tag-checked and current-item indicators are deliberately grayscale --
 # neutral, not tinted with the brand accent -- so they read as "selection",
 # a distinct concept from "accent". SELECTED_MARK reuses TEXT_PRIMARY rather
@@ -145,10 +147,9 @@ QLabel#hoverExplainerText {{
 QLabel#keycap {{
     background: {BG_PANEL_RAISED};
     color: {TEXT_PRIMARY};
-    border: 1px solid {BORDER};
-    border-bottom: 2px solid {BORDER};
+    border: 1px solid {KEYCAP_BORDER};
     border-radius: 4px;
-    padding: 1px 6px;
+    padding: -1px 4px;
     font-size: 10px;
     font-weight: 600;
 }}
