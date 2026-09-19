@@ -220,3 +220,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code personal/local settings (task-timing.log is already covered
+# by the blanket *.log rule above)
+.claude/settings.local.json
