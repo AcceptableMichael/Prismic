@@ -32,6 +32,20 @@ def test_search_narrows_only_the_unchecked_tags(qtbot: QtBot) -> None:
     assert _names(panel) == ["sunset", "sunrise"]
 
 
+def test_search_is_fuzzy_not_just_substring(qtbot: QtBot) -> None:
+    panel = TagPanel("Item tags")
+    qtbot.addWidget(panel)
+    panel.set_tags([*_TAGS, Tag(id=4, name="vacation")], frozenset())
+
+    panel.search_box.setText("aion")
+
+    # "aion" isn't a substring of "vacation" (v-A-c-a-t-I-O-N) -- only a
+    # subsequence, in order but not contiguous. None of the other tags
+    # contain a,i,o,n in order at all, so this only passes if matching is
+    # genuinely fuzzy.
+    assert _names(panel) == ["vacation"]
+
+
 def test_enter_with_a_match_toggles_the_top_filtered_result(qtbot: QtBot) -> None:
     panel = TagPanel("Item tags")
     qtbot.addWidget(panel)

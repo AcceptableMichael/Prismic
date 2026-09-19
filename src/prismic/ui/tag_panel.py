@@ -115,7 +115,7 @@ class TagPanel(QWidget):
         unchecked = [t for t in self._tags if t.id not in self._checked_ids]
         if not query:
             return unchecked
-        return [t for t in unchecked if query in t.name.lower()]
+        return [t for t in unchecked if _is_fuzzy_match(query, t.name.lower())]
 
     def _apply_filter(self) -> None:
         checked = [t for t in self._tags if t.id in self._checked_ids]
@@ -132,3 +132,13 @@ class TagPanel(QWidget):
         else:
             self.create_and_check_requested.emit(query)
         self.search_box.clear()
+
+
+def _is_fuzzy_match(query: str, text: str) -> bool:
+    """True if every character of `query` appears in `text` in order,
+    not necessarily contiguously -- "aion" matches "vacation" (v-A-c-a-t-
+    I-O-N). A strict superset of substring matching, so this never hides
+    a match the old substring search would have found. Both arguments are
+    expected already lowercased."""
+    remaining = iter(text)
+    return all(char in remaining for char in query)
