@@ -75,7 +75,6 @@ class ThumbnailDelegate(QStyledItemDelegate):
 
         if selected:
             painter.fillRect(rect, QColor(theme.SELECTED_WASH))
-            painter.fillRect(rect.x(), rect.y(), 3, rect.height(), QColor(theme.SELECTED_MARK))
         elif hovered:
             painter.fillRect(rect, QColor(theme.HOVER_WASH))
 
