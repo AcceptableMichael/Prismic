@@ -217,6 +217,37 @@ def test_in_viewer_tag_toggle_maps_the_current_item(
     assert window.session.mappings.tags_for_media(current_id) == []  # type: ignore[union-attr]
 
 
+def test_item_tag_hover_shows_digit_hint_within_the_shortcut_group(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    _open_and_wait(qtbot, window, collection_dir)
+    window._on_tag_create("vacation")
+    window._refresh_all()
+
+    window._on_item_tag_hover(0)
+
+    assert [label.text() for label in window._hover_bar._key_labels] == ["1"]
+    assert window._hover_bar._text_label.text() == 'Toggle "vacation" on the current item'
+
+
+def test_item_tag_hover_shows_ctrl_hint_past_the_shortcut_group(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    """Past the first 10 unchecked tags, rows no longer carry a shortcut
+    digit (see `_shortcut_digit_for_position`) -- hovering one of those
+    should point at "Ctrl", the key that toggles quick-select shortcuts
+    on/off, rather than going silent."""
+    _open_and_wait(qtbot, window, collection_dir)
+    for i in range(11):
+        window._on_tag_create(f"tag{i:02d}")
+    window._refresh_all()
+
+    window._on_item_tag_hover(10)  # 11th row -- past the 0..9 shortcut group
+
+    assert [label.text() for label in window._hover_bar._key_labels] == ["Ctrl"]
+    assert window._hover_bar._text_label.text() == "Toggle quick select shortcuts"
+
+
 def test_recently_clicked_tag_floats_to_the_top_of_both_panels(
     qtbot: QtBot, window: MainWindow, collection_dir: Path
 ) -> None:

@@ -621,7 +621,7 @@ class MainWindow(QMainWindow):
         )
         digit = self.item_tag_panel.model.data(self.item_tag_panel.model.index(row, 0), role)
         if not isinstance(digit, int):
-            self._hover_bar.clear()
+            self._hover_bar.show_hint(("Ctrl",), "Toggle quick select shortcuts")
             return
         tag = self.item_tag_panel.model.tag_at(row)
         self._hover_bar.show_hint((str(digit),), f'Toggle "{tag.name}" on the current item')
