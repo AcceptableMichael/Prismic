@@ -61,5 +61,11 @@ class HoverExplainerBar(QWidget):
             # in numeric text, so a "1"'s actual ink sits well left of
             # center within that full-width box unless centered explicitly.
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # Keep the keycap at least as wide as it is tall, so a single
+            # narrow digit gets a square box instead of a thin sliver --
+            # wider labels like "Shift" are unaffected since their natural
+            # width already exceeds the height.
+            height = label.sizeHint().height()
+            label.setMinimumWidth(height)
             self._key_labels.append(label)
             self._keys_layout.addWidget(label)
