@@ -230,15 +230,16 @@ def test_item_tag_hover_shows_digit_hint_within_the_shortcut_group(
     assert window._hover_bar._text_label.text() == 'Toggle "vacation" on the current item'
 
 
-def test_item_tag_hover_past_the_shortcut_group_names_that_row_s_own_group(
+def test_item_tag_hover_past_the_shortcut_group_in_its_own_active_group_clears(
     qtbot: QtBot, window: MainWindow, collection_dir: Path
 ) -> None:
     """Past the first 10 unchecked tags, rows no longer carry a shortcut
-    digit (see `_shortcut_digit_for_position`) -- hovering one of those
-    should point at "Ctrl" with a hint naming *this row's own* group
-    (unselected), not the group Ctrl would actually take shortcuts away
-    from (selected) -- Ctrl only ever moves numbering to a row's own
-    group, it can never add a digit to this specific overflow row."""
+    digit (see `_shortcut_digit_for_position`) -- but the unselected group
+    is *already* the numbered one by default, so Ctrl can't get this row a
+    digit; it would only take the numbering away from unselected tags
+    entirely and hand it to selected ones instead. There's no move that
+    helps this row, so the hint should go quiet rather than name a group
+    that's already numbered (misleadingly implying Ctrl would number it)."""
     _open_and_wait(qtbot, window, collection_dir)
     for i in range(11):
         window._on_tag_create(f"tag{i:02d}")
@@ -246,10 +247,8 @@ def test_item_tag_hover_past_the_shortcut_group_names_that_row_s_own_group(
 
     window._on_item_tag_hover(10)  # 11th row -- past the 0..9 shortcut group
 
-    assert [label.text() for label in window._hover_bar._key_labels] == ["Ctrl"]
-    assert (
-        window._hover_bar._text_label.text() == "Move quick-select shortcuts to unselected tags"
-    )
+    assert window._hover_bar._key_labels == []
+    assert window._hover_bar._text_label.text() == ""
 
 
 def test_item_tag_hover_over_selected_group_names_selected_tags(
@@ -272,6 +271,31 @@ def test_item_tag_hover_over_selected_group_names_selected_tags(
 
     assert [label.text() for label in window._hover_bar._key_labels] == ["Ctrl"]
     assert window._hover_bar._text_label.text() == "Move quick-select shortcuts to selected tags"
+
+
+def test_item_tag_hover_past_the_shortcut_group_mirrors_for_selected_mode(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    """Same overflow-within-the-active-group case as the unselected-mode
+    test above, mirrored: with "Number Selected Tags Instead" turned on,
+    it's the *selected* group that's numbered, so an 11th+ selected tag
+    should clear the hint rather than claim Ctrl would move shortcuts to
+    selected tags -- they're already there, and Ctrl would only take them
+    away."""
+    _open_and_wait(qtbot, window, collection_dir)
+    for i in range(11):
+        window._on_tag_create(f"tag{i:02d}")
+    current_id = window.session.state.result_set[0]  # type: ignore[union-attr]
+    window.session.state.current_item = current_id  # type: ignore[union-attr]
+    for tag in window.session.tags.list_all():  # type: ignore[union-attr]
+        window._on_item_tag_toggle(tag.id)  # select every tag
+    window._tag_shortcut_mode_action.setChecked(True)  # number the selected group
+    window._refresh_all()
+
+    window._on_item_tag_hover(10)  # 11th row -- past the 0..9 shortcut group
+
+    assert window._hover_bar._key_labels == []
+    assert window._hover_bar._text_label.text() == ""
 
 
 def test_recently_clicked_tag_floats_to_the_top_of_both_panels(

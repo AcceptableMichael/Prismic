@@ -616,21 +616,21 @@ class MainWindow(QMainWindow):
             return
         model = self.item_tag_panel.model
         index = model.index(row, 0)
-        role = (
-            CheckedShortcutRole
-            if self._tag_shortcut_mode_action.isChecked()
-            else UncheckedShortcutRole
-        )
+        active_selected = self._tag_shortcut_mode_action.isChecked()
+        role = CheckedShortcutRole if active_selected else UncheckedShortcutRole
         digit = model.data(index, role)
         if not isinstance(digit, int):
-            # No digit for this row, either because its group (selected vs.
-            # unselected -- independent of which one Ctrl currently numbers)
-            # isn't the numbered one, or because it's past the first 10 tags
-            # in a group that is. Either way, "Ctrl" only ever *moves* the
-            # numbering to a row's own group -- it doesn't add a shortcut to
-            # this specific row -- so the hint names that row's own group,
-            # not whichever group Ctrl would take shortcuts away from.
-            group = "selected" if model.data(index, CheckedRole) else "unselected"
+            row_selected = bool(model.data(index, CheckedRole))
+            if row_selected == active_selected:
+                # This row's own group already has the numbering -- it's
+                # just past the first 10 tags in it (see
+                # `_shortcut_digit_for_position`). Ctrl can't add a digit
+                # here; it would only take the numbering away from this
+                # row's whole group and give it to the other one, so there's
+                # no move that actually helps this row.
+                self._hover_bar.clear()
+                return
+            group = "selected" if row_selected else "unselected"
             self._hover_bar.show_hint(("Ctrl",), f"Move quick-select shortcuts to {group} tags")
             return
         tag = model.tag_at(row)
