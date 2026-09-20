@@ -211,11 +211,13 @@ class MainWindow(QMainWindow):
         )
         self._hover_hints.register_widget(
             self.item_tag_panel.header,
-            ("E",),
+            ("Tab",),
             "Focus the search/create box to tag the current file",
         )
         self._hover_hints.register_widget(
-            self.filter_panel.header, ("F",), "Focus the search/create box to filter by tag"
+            self.filter_panel.header,
+            ("Tab", "Tab"),
+            "Focus the search/create box to filter by tag",
         )
 
     def _build_menu(self) -> None:

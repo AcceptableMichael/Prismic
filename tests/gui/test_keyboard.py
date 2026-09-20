@@ -176,28 +176,30 @@ def test_global_shortcuts_still_work_when_the_result_list_has_focus(
 ) -> None:
     """Regression test for a bug a computer-use pass caught: QAbstractItemView
     has its own built-in "type to search" behavior that swallows a plain
-    letter key like "e" before it would ever reach a keyPressEvent override
-    on the window itself. Earlier tests all sent keys straight to `window`
+    letter key before it would ever reach a keyPressEvent override on the
+    window itself. Earlier tests all sent keys straight to `window`
     (`qtbot.keyClick(window, ...)`), which never exercised real Qt focus
     routing through a child widget and so never caught this. Fixed by
     intercepting keys via an application-level event filter instead.
 
-    "e" focuses the item-tag ("Edit this file") search box, "f" focuses
-    the filter search box (see `KeyboardController`'s `on_focus_item_tags`/
-    `on_focus_filter` wiring in `MainWindow`) -- typing a name there and
-    pressing Enter is what actually creates (and applies) the tag,
-    exercised in `test_main_window.py`."""
+    A lone "Tab" (once its short chord window elapses with nothing else
+    following) focuses the item-tag ("Edit this file") search box; "Tab"
+    "Tab" focuses the filter search box instead (see `KeyboardController`'s
+    `on_focus_item_tags`/`on_focus_filter` wiring in `MainWindow`) --
+    typing a name there and pressing Enter is what actually creates (and
+    applies) the tag, exercised in `test_main_window.py`."""
     window.result_list.setFocus()
     qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
 
-    qtbot.keyClick(window.result_list, Qt.Key.Key_E)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Tab)
 
-    assert window.item_tag_panel.search_box.hasFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
 
     window.result_list.setFocus()
     qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
 
-    qtbot.keyClick(window.result_list, Qt.Key.Key_F)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Tab)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Tab)
 
     assert window.filter_panel.search_box.hasFocus()
 
