@@ -263,14 +263,16 @@ class MainWindow(QMainWindow):
             "Toggle thumbnail previews in the results list",
         )
 
-        self._focus_mode_action = QAction("Focus Mode", self)
+        # "Focus Mode\tSpace" rather than `setShortcut(QKeySequence(...))`:
+        # a QMenu renders the text after a literal tab right-aligned as a
+        # shortcut hint, with no QShortcut actually created -- exactly what
+        # we want here, since a real one would collide with the viewer's
+        # own Space-to-play/pause button shortcut and go ambiguous (firing
+        # neither) whenever a video happens to be showing. Space is
+        # dispatched through KeyboardController instead -- see keyboard.py's
+        # module docstring for why that sidesteps the collision.
+        self._focus_mode_action = QAction("Focus Mode\tSpace", self)
         self._focus_mode_action.setCheckable(True)
-        # No QKeySequence shortcut here on purpose -- Space is dispatched
-        # through KeyboardController instead (see keyboard.py's module
-        # docstring for why: a QShortcut here would collide with the
-        # viewer's own Space-to-play/pause button shortcut and go
-        # ambiguous -- silently firing neither -- whenever a video happens
-        # to be showing).
         self._focus_mode_action.toggled.connect(self._apply_focus_mode)
         view_menu.addAction(self._focus_mode_action)
         self._hover_hints.register_action(
