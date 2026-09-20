@@ -209,14 +209,10 @@ class MainWindow(QMainWindow):
             self.viewer.play_pause_button, ("Space",), "Play or pause the video"
         )
         self._hover_hints.register_widget(
-            self.item_tag_panel.header,
-            ("Tab",),
-            "Focus the search/create box to tag the current file",
+            self.item_tag_panel.header, ("Tab",), "Cycle between edit and filter"
         )
         self._hover_hints.register_widget(
-            self.filter_panel.header,
-            ("Tab", "Tab"),
-            "Focus the search/create box to filter by tag",
+            self.filter_panel.header, ("Tab",), "Cycle between edit and filter"
         )
 
     def _build_menu(self) -> None:
