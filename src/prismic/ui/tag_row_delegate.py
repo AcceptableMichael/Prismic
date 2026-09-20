@@ -58,10 +58,16 @@ from prismic.ui.tag_model import CheckedRole, CheckedShortcutRole, TagIdRole, Un
 _Index = QModelIndex | QPersistentModelIndex
 
 _ROW_HEIGHT = 32
-_CHECKBOX_SIZE = 14
+# 1px taller than the checkbox otherwise needs, purely to give the
+# shortcut digit painted inside it (see _paint_shortcut_digit) a hair more
+# vertical room -- a plain AlignCenter in the original 14px box rendered
+# visibly off-center on the actual display (direction depended on which
+# rendering path was checked; a real screen and an offscreen grab
+# disagreed), and no single manual nudge held up across both.
+_CHECKBOX_SIZE = 15
 _ICON_SIZE = 18
 _PAD = 8
-_SHORTCUT_DIGIT_PIXEL_SIZE = 9  # small enough to fit inside a 14px checkbox
+_SHORTCUT_DIGIT_PIXEL_SIZE = 9  # small enough to fit inside the checkbox
 
 
 class TagRowDelegate(QStyledItemDelegate):
@@ -207,14 +213,7 @@ class TagRowDelegate(QStyledItemDelegate):
         font.setPixelSize(_SHORTCUT_DIGIT_PIXEL_SIZE)
         font.setBold(True)
         painter.setFont(font)
-        # AlignCenter centers on the font's full ascent+descent box, which
-        # sits visibly below true optical center for a bold digit at this
-        # size -- nudged up to compensate (checked empirically by grabbing
-        # the painted row to a PNG and comparing against the checkbox's
-        # actual pixel center).
-        painter.drawText(
-            checkbox_rect.adjusted(0, -1, 0, -1), Qt.AlignmentFlag.AlignCenter, str(digit)
-        )
+        painter.drawText(checkbox_rect, Qt.AlignmentFlag.AlignCenter, str(digit))
         painter.restore()
 
     def editorEvent(
