@@ -64,8 +64,13 @@ class HoverExplainerBar(QWidget):
             # Keep the keycap at least as wide as it is tall, so a single
             # narrow digit gets a square box instead of a thin sliver --
             # wider labels like "Shift" are unaffected since their natural
-            # width already exceeds the height.
-            height = label.sizeHint().height()
-            label.setMinimumWidth(height)
+            # width already exceeds the height. The label's own sizeHint()
+            # is no good for "tall" here: it reflects the label's
+            # unconstrained natural height, not the taller height it's
+            # actually stretched to once laid out in this bar (pinned by
+            # the "min-height" rule on QWidget#hoverExplainerBar in
+            # theme.py) -- so this uses the bar's own already-realized
+            # height instead.
+            label.setMinimumWidth(self.height())
             self._key_labels.append(label)
             self._keys_layout.addWidget(label)
