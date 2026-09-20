@@ -8,6 +8,7 @@ from pytestqt.qtbot import QtBot
 
 from prismic.application.input import shortcuts
 from prismic.ui.main_window import MainWindow
+from prismic.ui.settings_dialog import SettingsDialog
 
 
 @pytest.fixture
@@ -634,6 +635,48 @@ def test_shortcuts_stand_down_while_a_modal_dialog_is_open(
     qtbot.keyClick(window.result_list, Qt.Key.Key_Right)
 
     assert session.state.current_item != first_id  # working again afterwards
+
+
+def test_opening_settings_applies_what_is_changed_in_it(
+    qtbot: QtBot, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The connection between the two halves of the feature. Every other
+    test here calls `_apply_bindings()` by hand; this is the one that
+    checks `open_settings` actually subscribes to the dialog, rather than
+    recording a rebind that never reaches the running UI. `exec()` is
+    stubbed out because it would otherwise block on its own event loop."""
+    opened: list[SettingsDialog] = []
+
+    def capture(dialog: SettingsDialog) -> int:
+        opened.append(dialog)
+        return 0
+
+    monkeypatch.setattr(SettingsDialog, "exec", capture)
+
+    window.open_settings()
+
+    assert len(opened) == 1
+    row = next(r for r in opened[0].shortcuts_panel.rows if r.definition.id == shortcuts.RESCAN)
+    qtbot.mouseClick(row._clear_button, Qt.MouseButton.LeftButton)
+
+    assert window.bindings.binding(shortcuts.RESCAN) == ""
+    assert window._shortcut_actions[shortcuts.RESCAN].shortcut().isEmpty()
+
+
+def test_the_settings_menu_entry_opens_the_window(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[SettingsDialog] = []
+
+    def capture(dialog: SettingsDialog) -> int:
+        opened.append(dialog)
+        return 0
+
+    monkeypatch.setattr(SettingsDialog, "exec", capture)
+
+    window._shortcut_actions[shortcuts.OPEN_SETTINGS].trigger()
+
+    assert len(opened) == 1
 
 
 def test_bindings_persist_across_windows(qtbot: QtBot) -> None:

@@ -461,10 +461,15 @@ QComboBox#tapModifierCombo {{
     padding: 5px 8px;
     font-size: 11px;
 }}
-QComboBox#tapModifierCombo::drop-down {{
-    border: none;
-    width: 18px;
-}}
+/* The drop-down indicator matters more here than it normally would:
+   this control sits in a column of identically-sized key boxes, and the
+   arrow is the only thing saying "this one opens a list" rather than
+   "press a key here" -- so it's left to the platform style rather than
+   restyled. Note the two subcontrols are deliberately NOT given rules
+   of their own: adding even a `::drop-down {{ border: none }}` suppresses
+   the style's arrow entirely, and Qt's QSS box model doesn't reproduce
+   the CSS zero-size-plus-borders triangle used to replace it (it draws
+   a solid bar instead). */
 QComboBox QAbstractItemView {{
     background: {BG_PANEL_RAISED};
     color: {TEXT_PRIMARY};

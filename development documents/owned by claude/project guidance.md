@@ -270,3 +270,74 @@ not automated assertions):
   [`phases/05-ui-and-viewer.md`](phases/05-ui-and-viewer.md) for the full
   writeup — this is exactly the class of bug a computer-use pass exists to
   catch that automated tests, as originally written, missed.
+
+## 2026-09-20: shortcuts are a registry now — add them there, not inline
+
+`src/prismic/application/input/shortcuts.py` is the single declaration of
+every keyboard shortcut in the app. **Adding a shortcut means adding a
+`ShortcutDefinition` to `SHORTCUTS`** — it then appears in the Settings
+window (File > Settings…), is rebindable, persists, and shows up in the
+hover-explainer bar, all with no further wiring. Hard-coding a key
+anywhere else now produces a shortcut the user can see no trace of and
+cannot change, which is a regression in this feature, not a shortcut.
+
+Things worth knowing before touching it:
+
+- **Bindings are Qt *portable* key-sequence strings** ("Ctrl+Shift+O",
+  "Space", "Left", "Esc"). `ui/keyboard.key_text()` produces them from a
+  `QKeyEvent` and `QKeySequence` round-trips them exactly, which is the
+  whole reason that format was picked over anything hand-rolled. The
+  registry itself stays Qt-free so it's unit-testable without a
+  `QApplication`.
+- **Two shortcuts sharing a key is sometimes correct.** Focus Mode and
+  the viewer's play/pause are both Space by design, resolved by input
+  context (overview section 10). That's what `ShortcutScope` is for —
+  conflict detection only looks within a scope, so the app's own
+  defaults don't get flagged.
+- **Not every shortcut is a key combination.** "Tap Ctrl alone" has no
+  `QKeySequence` at all; it's `ShortcutKind.TAP_MODIFIER`, recognized
+  from a press/release pair in `MainWindow.eventFilter` and edited with
+  a modifier chooser rather than a capture box.
+- **`MainWindow._apply_bindings()` is the only place an id becomes a real
+  key.** It's called at construction and from the Settings dialog's
+  `bindings_changed`. Anything new that needs a literal key (a menu
+  entry, a button shortcut, a painted label) belongs in there.
+- **Tests must not touch the developer's own preferences.** The autouse
+  `isolated_preferences` fixture in `tests/conftest.py` redirects the
+  config directory by setting the environment variables
+  `preferences_directory()` actually reads, rather than patching the
+  function, so `test_preferences.py` still exercises the real resolution
+  logic.
+
+Two process notes from this pass:
+
+1. **The computer-use masking problem recurred and re-granting did not
+   fix it.** `request_access(["Prismic"])` resolved to the correct
+   `.venv\Scripts\prismic.exe` path, matching `Get-Process`, and the
+   window was still captured as a solid black rectangle — through a
+   relaunch, a re-grant, and bringing it to the front from the taskbar.
+   (The taskbar's own hover thumbnail rendered the app correctly, which
+   is how we know it was masking and not a rendering bug.) **What
+   worked instead: a throwaway script that builds the real widgets,
+   drives them, and calls `QWidget.grab().save(...)`,** then reading the
+   PNGs back. That's the guidance doc's own `QWidget.grab()` suggestion
+   promoted from "if there's any doubt" to the primary path when masking
+   won't clear — it uses the real widgets and real code paths, and it
+   can drive interactions too, so it's a genuine substitute for a
+   computer-use pass rather than a consolation prize. It caught the
+   drop-down-arrow issue in note 2 below.
+2. **A test gap that only the live pass exposed.** Every automated test
+   drove `_apply_bindings()` directly, so nothing covered
+   `open_settings()` actually connecting the dialog's `bindings_changed`
+   signal — a rebind could have been persisted and then ignored by the
+   running UI. Found by driving the real window in the grab script and
+   noticing the menu action still held its old key. Now tested. The
+   general lesson: when a feature has a "record it" half and an "apply
+   it" half, test the wire between them explicitly, not just each end.
+
+One Qt/QSS gotcha found while styling the Settings window: **giving a
+`QComboBox` any `::drop-down` rule at all suppresses the platform
+style's arrow**, and Qt's QSS box model does *not* reproduce the CSS
+zero-size-plus-transparent-borders triangle normally used to replace it
+— it draws a solid bar instead. Leave both `::drop-down` and
+`::down-arrow` unstyled if you want an arrow.
