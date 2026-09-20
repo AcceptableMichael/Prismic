@@ -4,14 +4,11 @@ Text-editing precedence is handled by Qt's own focus system, not
 reimplemented here: a focused `QLineEdit`/`QInputDialog` receives key events
 directly, so this controller's `handle_key_press` never runs the rest of its
 dispatch for those keys -- Qt delivers input to whatever's focused first,
-before it would ever reach the main window. The one deliberate exception is
-Up/Down: they have no meaning in a single-line text field (unlike Left/
+before it would ever reach the main window. Up/Down are a deliberate
+exception: they have no meaning in a single-line text field (unlike Left/
 Right, which move the caret), so result-list navigation stays reachable
 even while a tag search/rename box has focus -- see the `text_editing`
-branch below. What's left to arbitrate for everything else is chord state
-(`LOCAL_MODAL`) versus plain navigation/commands (`GLOBAL_COMMAND`) -- a
-separate `VIEWER` context isn't needed in practice yet, since nothing here
-has viewer-specific keys that would conflict with a global one.
+branch below. Digit keys are a second, narrower exception -- see below.
 
 Tab fires `on_focus_item_tags` immediately, right here, with no chord/
 timeout involved -- once focus actually lands in that search box (a
@@ -34,30 +31,52 @@ the two Space behaviors don't collide. (Escape is `MainWindow`'s fallback
 out of focus mode for exactly the case this creates: entering focus mode
 while viewing an image, then navigating to a video, leaves Space bound to
 play/pause with no way back via this controller alone.)
+
+Digit keys (0-9) toggle whichever tag the item-tags panel currently has
+numbered on that digit -- see `TagListModel`/`TagRowDelegate` for the
+numbering itself, and `MainWindow` for which side of the checked/unchecked
+split is currently numbered. Only the non-text-editing case is handled
+here, though: while a text box has focus, `MainWindow.eventFilter`
+intercepts digits itself, ahead of ever calling in here, since Ctrl+digit
+needs to insert a literal character into that specific focused widget --
+something this controller has no widget access to do, being a plain
+callback dispatcher. (Emphasis on *insert*: letting a Ctrl+digit
+`QKeyEvent` fall through to the widget unhandled does not, in practice,
+type anything -- Windows hands Qt an empty `text()` for most Ctrl+digit
+combinations, confirmed empirically here, so passthrough alone would
+silently make digits untypable in these fields even with Ctrl held.)
+Ctrl on its own (tapped alone, nothing else pressed while it's down) is a
+third, unrelated gesture, also handled entirely in `MainWindow`, that
+toggles which side of the checked/unchecked split gets numbered at all;
+this controller has no notion of that toggle, only of resolving whatever
+digit was pressed against whichever side is currently active.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, Qt, QTimer
+from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QKeyEvent
 
-from prismic.application.input.chord import ChordState
 from prismic.application.input.resolver import InputContext, InputEvent, InputResolver
 
-_CHORD_TIMEOUT_SECONDS = 1.5
-
-# "t" then a digit 1-9 toggles the Nth tag (in list order) on the current
-# item -- one chord covers both "apply" and "remove" (whichever it isn't
-# already is what pressing it does).
-_CHORD_TABLE: dict[tuple[str, ...], str] = {
-    ("t", str(digit)): f"toggle_tag_{digit - 1}" for digit in range(1, 10)
+DIGIT_KEYS: dict[int, int] = {
+    Qt.Key.Key_0: 0,
+    Qt.Key.Key_1: 1,
+    Qt.Key.Key_2: 2,
+    Qt.Key.Key_3: 3,
+    Qt.Key.Key_4: 4,
+    Qt.Key.Key_5: 5,
+    Qt.Key.Key_6: 6,
+    Qt.Key.Key_7: 7,
+    Qt.Key.Key_8: 8,
+    Qt.Key.Key_9: 9,
 }
 
 
 class KeyboardController(QObject):
-    """Owns chord state and dispatches resolved key events to callbacks."""
+    """Dispatches resolved key events to callbacks."""
 
     def __init__(
         self,
@@ -66,27 +85,19 @@ class KeyboardController(QObject):
         on_navigate_next: Callable[[], None],
         on_undo: Callable[[], None],
         on_focus_item_tags: Callable[[], None],
-        on_toggle_tag_by_index: Callable[[int], None],
+        on_toggle_tag_shortcut: Callable[[int], None],
         on_toggle_focus_mode: Callable[[], None],
-        on_chord_status_changed: Callable[[str], None],
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self._chord = ChordState(timeout_seconds=_CHORD_TIMEOUT_SECONDS)
-        self._chord_timer = QTimer(self)
-        self._chord_timer.setSingleShot(True)
-        self._chord_timer.timeout.connect(self._on_chord_timeout)
-
         self._on_navigate_previous = on_navigate_previous
         self._on_navigate_next = on_navigate_next
         self._on_undo = on_undo
         self._on_focus_item_tags = on_focus_item_tags
-        self._on_toggle_tag_by_index = on_toggle_tag_by_index
+        self._on_toggle_tag_shortcut = on_toggle_tag_shortcut
         self._on_toggle_focus_mode = on_toggle_focus_mode
-        self._on_chord_status_changed = on_chord_status_changed
 
         self._resolver = InputResolver()
-        self._resolver.register(InputContext.LOCAL_MODAL, self._handle_chord_key)
         self._resolver.register(InputContext.GLOBAL_COMMAND, self._handle_global_key)
 
     def handle_key_press(self, event: QKeyEvent, *, text_editing: bool) -> bool:
@@ -96,13 +107,11 @@ class KeyboardController(QObject):
         `text_editing` is whether a text-entry widget currently has focus
         (a tag search/create box, an inline rename editor, ...). While
         true, everything except Up/Down is left alone entirely so normal
-        typing works -- Up/Down are handled directly, ahead of the chord/
-        global resolver, since result-list navigation should work no
-        matter where the caret is."""
-        key_text = _key_text(event)
-        if key_text is None:
-            return False
+        typing works -- `MainWindow.eventFilter` handles digits itself in
+        that case, ahead of ever calling in here (see this module's
+        docstring for why)."""
         if text_editing:
+            key_text = _key_text(event)
             if key_text == "Up":
                 self._on_navigate_previous()
                 return True
@@ -110,26 +119,14 @@ class KeyboardController(QObject):
                 self._on_navigate_next()
                 return True
             return False
-        return self._resolver.dispatch(InputEvent(key=key_text))
-
-    @property
-    def chord_is_pending(self) -> bool:
-        return self._chord.is_pending
-
-    def _handle_chord_key(self, event: InputEvent) -> bool:
-        if not self._chord.is_pending:
-            return False  # no chord in progress -- let GLOBAL_COMMAND try it
-        if event.key == "Escape":
-            self._cancel_chord()
+        digit = DIGIT_KEYS.get(event.key())
+        if digit is not None:
+            self._on_toggle_tag_shortcut(digit)
             return True
-
-        self._chord.press(event.key)
-        self._chord_timer.start(int(_CHORD_TIMEOUT_SECONDS * 1000))
-        command = self._chord.match(_CHORD_TABLE)
-        if command is not None:
-            self._run_chord_command(command)
-        self._update_chord_status()
-        return True
+        key_text = _key_text(event)
+        if key_text is None:
+            return False
+        return self._resolver.dispatch(InputEvent(key=key_text))
 
     def _handle_global_key(self, event: InputEvent) -> bool:
         if event.key in ("Left", "Up"):
@@ -147,32 +144,7 @@ class KeyboardController(QObject):
         if event.key == "Space":
             self._on_toggle_focus_mode()
             return True
-        if event.key == "t":
-            self._chord.press("t")
-            self._chord_timer.start(int(_CHORD_TIMEOUT_SECONDS * 1000))
-            self._update_chord_status()
-            return True
         return False
-
-    def _run_chord_command(self, command: str) -> None:
-        if command.startswith("toggle_tag_"):
-            index = int(command.removeprefix("toggle_tag_"))
-            self._on_toggle_tag_by_index(index)
-
-    def _cancel_chord(self) -> None:
-        self._chord.cancel()
-        self._chord_timer.stop()
-        self._update_chord_status()
-
-    def _on_chord_timeout(self) -> None:
-        self._chord.advance_time(_CHORD_TIMEOUT_SECONDS)
-        self._update_chord_status()
-
-    def _update_chord_status(self) -> None:
-        if self._chord.is_pending:
-            self._on_chord_status_changed(" ".join(self._chord.pending_keys) + " …")
-        else:
-            self._on_chord_status_changed("")
 
 
 def _key_text(event: QKeyEvent) -> str | None:

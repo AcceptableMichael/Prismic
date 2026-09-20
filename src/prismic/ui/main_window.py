@@ -52,8 +52,9 @@ from prismic.ui.future_watcher import FutureWatcher
 from prismic.ui.hover_explainer_bar import HoverExplainerBar
 from prismic.ui.hover_hint import HoverHintController
 from prismic.ui.instance_bridge import InstanceBridge, request_focus
-from prismic.ui.keyboard import KeyboardController
+from prismic.ui.keyboard import DIGIT_KEYS, KeyboardController
 from prismic.ui.result_model import MediaIdRole, ResultListModel
+from prismic.ui.tag_model import CheckedShortcutRole, UncheckedShortcutRole
 from prismic.ui.tag_panel import TagPanel
 from prismic.ui.thumbnail_delegate import ThumbnailDelegate
 from prismic.ui.thumbnail_provider import ThumbnailProvider
@@ -81,6 +82,11 @@ class MainWindow(QMainWindow):
         # Sticky last arrow-key direction, so preloading can bias further
         # ahead of travel than behind -- see _preload_neighbors().
         self._nav_direction = 1
+        # True from a Key_Control press until either its own release (a
+        # "tap" -- toggles _tag_shortcut_mode_action, see eventFilter) or
+        # any other key/mouse press invalidates it (held as a modifier for
+        # something else instead).
+        self._ctrl_tap_candidate = False
         # See _stable_item_tags(): the item-tag panel's checked-group
         # ordering for whichever file is current, held stable across
         # add/remove until that file changes.
@@ -96,9 +102,8 @@ class MainWindow(QMainWindow):
             on_navigate_next=lambda: self._navigate(1),
             on_undo=self._undo,
             on_focus_item_tags=self.item_tag_panel.focus_search,
-            on_toggle_tag_by_index=self._toggle_tag_by_index,
+            on_toggle_tag_shortcut=self._on_toggle_tag_shortcut,
             on_toggle_focus_mode=self._toggle_focus_mode,
-            on_chord_status_changed=self._transient_bar.show_message,
             parent=self,
         )
         # Installed on the application, not just this window: a normal Qt
@@ -106,11 +111,11 @@ class MainWindow(QMainWindow):
         # but Qt delivers key events to whatever child widget is focused
         # first -- and QAbstractItemView (the tag/result lists) has its own
         # built-in "type to search" behavior that swallows plain letter/
-        # digit keys before they'd ever reach here. Global commands and
-        # chords need to win regardless of which child last had a click, so
-        # they're intercepted at the application level instead. Text-editing
-        # widgets (a QLineEdit inside a rename/create dialog) are explicitly
-        # exempted -- that's this app's actual TEXT_EDITING precedence case.
+        # digit keys before they'd ever reach here. Global commands (and
+        # the tag-shortcut digits, which deliberately win even over a
+        # focused text box -- see keyboard.py) need to fire regardless of
+        # which child last had a click, so they're intercepted at the
+        # application level instead.
         app = QApplication.instance()
         assert app is not None  # a QApplication always exists by the time a QWidget is built
         app.installEventFilter(self)
@@ -140,7 +145,7 @@ class MainWindow(QMainWindow):
         # (an intersection filter). Conflating "check to filter" and
         # "check to tag" into a single list would mean browsing could
         # silently mutate a file's tags -- kept deliberately separate.
-        self.item_tag_panel = TagPanel("Edit this file")
+        self.item_tag_panel = TagPanel("Edit this file", show_shortcuts=True)
         self.item_tag_panel.toggle_requested.connect(self._on_item_tag_toggle)
         self.item_tag_panel.create_and_check_requested.connect(self._on_item_create_and_check)
         self.item_tag_panel.rename_requested.connect(self._on_tag_rename)
@@ -280,6 +285,23 @@ class MainWindow(QMainWindow):
             view_menu,
             ("Space",),
             "Hide every panel except the media viewer",
+        )
+
+        # No shortcut set here either, for a different reason than Focus
+        # Mode's: this one isn't a single keystroke at all. It's toggled by
+        # tapping Ctrl alone (pressed and released with no other key in
+        # between) -- see MainWindow.eventFilter -- which has no
+        # QKeySequence representation to attach to a QAction in the first
+        # place.
+        self._tag_shortcut_mode_action = QAction("Number Selected Tags Instead", self)
+        self._tag_shortcut_mode_action.setCheckable(True)
+        self._tag_shortcut_mode_action.toggled.connect(self._apply_tag_shortcut_mode)
+        view_menu.addAction(self._tag_shortcut_mode_action)
+        self._hover_hints.register_action(
+            self._tag_shortcut_mode_action,
+            view_menu,
+            ("Ctrl",),
+            "Tap Ctrl alone to switch which tags the Edit list numbers",
         )
 
     # -- Session lifecycle --------------------------------------------------
@@ -589,14 +611,20 @@ class MainWindow(QMainWindow):
         self._refresh_all()
 
     def _on_item_tag_hover(self, row: int | None) -> None:
-        # Only rows 1-9 have a shortcut at all (the "t" then digit 1-9
-        # chord below only covers that many) -- anything past that has
-        # nothing to show yet, same as a row with no hover at all.
-        if row is None or row >= 9:
+        if row is None:
+            self._hover_bar.clear()
+            return
+        role = (
+            CheckedShortcutRole
+            if self._tag_shortcut_mode_action.isChecked()
+            else UncheckedShortcutRole
+        )
+        digit = self.item_tag_panel.model.data(self.item_tag_panel.model.index(row, 0), role)
+        if not isinstance(digit, int):
             self._hover_bar.clear()
             return
         tag = self.item_tag_panel.model.tag_at(row)
-        self._hover_bar.show_hint(("T", str(row + 1)), f'Toggle "{tag.name}" on the current item')
+        self._hover_bar.show_hint((str(digit),), f'Toggle "{tag.name}" on the current item')
 
     def _on_item_create_and_check(self, name: str) -> None:
         tag = self._create_tag_and_find(name)
@@ -648,13 +676,21 @@ class MainWindow(QMainWindow):
         self.menuBar().setVisible(visible)
         self.statusBar().setVisible(visible)
 
-    def _toggle_tag_by_index(self, index: int) -> None:
-        if self.session is None:
-            return
-        tags = self.session.tags.list_all()
-        if not 0 <= index < len(tags):
-            return
-        self._on_item_tag_toggle(tags[index].id)
+    def _on_toggle_tag_shortcut(self, digit: int) -> None:
+        tag_id = self.item_tag_panel.model.tag_id_for_shortcut(
+            digit, selected=self._tag_shortcut_mode_action.isChecked()
+        )
+        if tag_id is not None:
+            self._on_item_tag_toggle(tag_id)
+
+    def _toggle_tag_shortcut_mode(self) -> None:
+        self._tag_shortcut_mode_action.setChecked(not self._tag_shortcut_mode_action.isChecked())
+
+    def _apply_tag_shortcut_mode(self, selected: bool) -> None:
+        self.item_tag_panel.set_shortcut_mode_selected(selected)
+        self._transient_bar.show_message(
+            "Numbering selected tags" if selected else "Numbering unselected tags", 2000
+        )
 
     def _on_viewer_error(self, reason: str) -> None:
         self._transient_bar.show_message(f"Could not load media: {reason}", 5000)
@@ -676,6 +712,15 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
+            if not event.isAutoRepeat():
+                if event.key() == Qt.Key.Key_Control:
+                    self._ctrl_tap_candidate = True
+                else:
+                    # Some other key went down while Ctrl may or may not be
+                    # held -- either way, a later Ctrl release no longer
+                    # counts as "tapped alone." Harmless no-op if Ctrl was
+                    # never down to begin with.
+                    self._ctrl_tap_candidate = False
             if event.key() == Qt.Key.Key_Escape:
                 handled = False
                 if self._focus_is_text_editing():
@@ -694,11 +739,42 @@ class MainWindow(QMainWindow):
             if event.key() == Qt.Key.Key_Tab and self._cycle_tag_search_focus():
                 event.accept()
                 return True
+            if self._focus_is_text_editing():
+                digit = DIGIT_KEYS.get(event.key())
+                if digit is not None:
+                    if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                        # Letting this fall through unhandled does not, in
+                        # practice, type the digit -- Windows hands Qt an
+                        # empty text() for most Ctrl+digit combinations
+                        # (confirmed empirically), so QLineEdit would
+                        # insert nothing on its own. Inserted directly
+                        # instead, which is also why this has to live here
+                        # rather than in KeyboardController: it needs the
+                        # actual focused widget, not just a key string.
+                        focused = QApplication.focusWidget()
+                        if isinstance(focused, QLineEdit):
+                            focused.insert(str(digit))
+                    else:
+                        self._on_toggle_tag_shortcut(digit)
+                    event.accept()
+                    return True
             if self.session is not None and self.keyboard.handle_key_press(
                 event, text_editing=self._focus_is_text_editing()
             ):
                 event.accept()
                 return True
+        elif event.type() == QEvent.Type.KeyRelease and isinstance(event, QKeyEvent):
+            if event.key() == Qt.Key.Key_Control and not event.isAutoRepeat():
+                if self._ctrl_tap_candidate:
+                    self._toggle_tag_shortcut_mode()
+                self._ctrl_tap_candidate = False
+            # Deliberately not consumed either way -- this is an
+            # observation of the release, not a binding on it.
+        elif event.type() == QEvent.Type.MouseButtonPress:
+            # A Ctrl+click (of whatever kind, anywhere) is a held modifier
+            # doing something else, same as a Ctrl+key combo above -- its
+            # eventual Ctrl release shouldn't also toggle the tag numbering.
+            self._ctrl_tap_candidate = False
         return super().eventFilter(watched, event)
 
     def _cycle_tag_search_focus(self) -> bool:

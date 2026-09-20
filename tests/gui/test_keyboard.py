@@ -129,48 +129,6 @@ def test_undo_shortcut_reverts_the_last_command(qtbot: QtBot, window: MainWindow
     assert session.tags.list_all() == []
 
 
-def test_chord_toggles_a_tag_on_the_current_item(qtbot: QtBot, window: MainWindow) -> None:
-    session = window.session
-    assert session is not None
-    window._on_tag_create("vacation")
-    tag = session.tags.list_all()[0]
-    current_id = session.state.result_set[0]
-    session.state.current_item = current_id
-
-    qtbot.keyClick(window, Qt.Key.Key_T)
-    assert window.keyboard.chord_is_pending is True
-
-    qtbot.keyClick(window, Qt.Key.Key_1)
-
-    assert window.keyboard.chord_is_pending is False
-    assert [t.id for t in session.mappings.tags_for_media(current_id)] == [tag.id]
-
-
-def test_escape_cancels_a_pending_chord(qtbot: QtBot, window: MainWindow) -> None:
-    qtbot.keyClick(window, Qt.Key.Key_T)
-    assert window.keyboard.chord_is_pending is True
-
-    qtbot.keyClick(window, Qt.Key.Key_Escape)
-
-    assert window.keyboard.chord_is_pending is False
-
-
-def test_a_dead_end_key_cancels_the_chord(qtbot: QtBot, window: MainWindow) -> None:
-    qtbot.keyClick(window, Qt.Key.Key_T)
-    assert window.keyboard.chord_is_pending is True
-
-    qtbot.keyClick(window, Qt.Key.Key_Q)  # not a valid continuation of any chord
-
-    assert window.keyboard.chord_is_pending is False
-
-
-def test_a_pending_chord_times_out_on_its_own(qtbot: QtBot, window: MainWindow) -> None:
-    qtbot.keyClick(window, Qt.Key.Key_T)
-    assert window.keyboard.chord_is_pending is True
-
-    qtbot.waitUntil(lambda: window.keyboard.chord_is_pending is False, timeout=3000)
-
-
 def test_global_shortcuts_still_work_when_the_result_list_has_focus(
     qtbot: QtBot, window: MainWindow
 ) -> None:
@@ -296,3 +254,135 @@ def test_opening_a_collection_resets_focus_mode(
 
     assert window._focus_mode_action.isChecked() is False
     assert window.result_list.isVisible()
+
+
+def test_digit_toggles_the_unselected_tag_numbered_with_it(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    current_id = session.state.result_set[0]
+    session.state.current_item = current_id
+    window._on_tag_create("a")
+    window._on_tag_create("b")
+    assert window._tag_shortcut_mode_action.isChecked() is False  # unselected by default
+    tag_id = window.item_tag_panel.model.tag_id_for_shortcut(1, selected=False)
+    assert tag_id is not None
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_1)
+
+    assert [t.id for t in session.mappings.tags_for_media(current_id)] == [tag_id]
+
+
+def test_digit_toggles_a_tag_even_while_a_search_box_is_focused(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    current_id = session.state.result_set[0]
+    session.state.current_item = current_id
+    window._on_tag_create("a")
+    tag_id = window.item_tag_panel.model.tag_id_for_shortcut(1, selected=False)
+    assert tag_id is not None
+
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.item_tag_panel.search_box, Qt.Key.Key_1)
+
+    assert window.item_tag_panel.search_box.text() == ""  # not typed
+    assert [t.id for t in session.mappings.tags_for_media(current_id)] == [tag_id]
+
+    # Also true from the *filter* search box, per the request this
+    # implements -- the toggle still applies to the Edit list regardless
+    # of which of the two boxes has focus.
+    window._on_item_tag_toggle(tag_id)  # untoggle it again
+    window.filter_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.filter_panel.search_box.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.filter_panel.search_box, Qt.Key.Key_1)
+
+    assert window.filter_panel.search_box.text() == ""
+    assert [t.id for t in session.mappings.tags_for_media(current_id)] == [tag_id]
+
+
+def test_ctrl_digit_types_a_literal_digit_instead_of_toggling(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    session.state.current_item = session.state.result_set[0]
+    window._on_tag_create("a")
+
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+    qtbot.keyClick(
+        window.item_tag_panel.search_box, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier
+    )
+
+    assert window.item_tag_panel.search_box.text() == "1"
+    assert session.mappings.tags_for_media(session.state.current_item) == []
+
+
+def test_ctrl_tapped_alone_toggles_which_tags_are_numbered(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    assert window._tag_shortcut_mode_action.isChecked() is False
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyPress(window.result_list, Qt.Key.Key_Control)
+    qtbot.keyRelease(window.result_list, Qt.Key.Key_Control)
+
+    assert window._tag_shortcut_mode_action.isChecked() is True
+
+    qtbot.keyPress(window.result_list, Qt.Key.Key_Control)
+    qtbot.keyRelease(window.result_list, Qt.Key.Key_Control)
+
+    assert window._tag_shortcut_mode_action.isChecked() is False
+
+
+def test_ctrl_plus_another_key_does_not_toggle_the_mode_on_release(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    """Ctrl+Z (undo) holds Ctrl down for an unrelated shortcut -- its
+    eventual release must not also count as "tapped alone."."""
+    session = window.session
+    assert session is not None
+    window._on_tag_create("vacation")
+    assert len(session.tags.list_all()) == 1
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyPress(window.result_list, Qt.Key.Key_Control)
+    qtbot.keyPress(window.result_list, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    qtbot.keyRelease(window.result_list, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    qtbot.keyRelease(window.result_list, Qt.Key.Key_Control)
+
+    assert session.tags.list_all() == []  # the undo itself still fired
+    assert window._tag_shortcut_mode_action.isChecked() is False
+
+
+def test_selected_tag_mode_numbers_and_toggles_checked_tags_instead(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    current_id = session.state.result_set[0]
+    session.state.current_item = current_id
+    window._on_tag_create("a")
+    window._on_tag_create("b")
+    tag_a = session.tags.list_all()[0]
+    window._on_item_tag_toggle(tag_a.id)  # "a" is now checked on the current item
+
+    window._toggle_tag_shortcut_mode()
+    assert window._tag_shortcut_mode_action.isChecked() is True
+
+    tag_id = window.item_tag_panel.model.tag_id_for_shortcut(1, selected=True)
+    assert tag_id == tag_a.id
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_1)
+
+    assert session.mappings.tags_for_media(current_id) == []  # toggled back off

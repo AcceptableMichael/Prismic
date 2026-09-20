@@ -35,7 +35,9 @@ class TagPanel(QWidget):
     delete_requested = Signal(int)  # tag_id
     hover_row_changed = Signal(object)  # int row index, or None when hovering no row
 
-    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, title: str, parent: QWidget | None = None, *, show_shortcuts: bool = False
+    ) -> None:
         super().__init__(parent)
         self._tags: list[Tag] = []
         self._checked_ids: frozenset[int] = frozenset()
@@ -58,11 +60,13 @@ class TagPanel(QWidget):
         self.list_view.viewport().setMouseTracking(True)
         self.list_view.viewport().installEventFilter(self)
         self.list_view.setModel(self.model)
-        delegate = TagRowDelegate(self.list_view, self.list_view)
-        delegate.toggle_requested.connect(self.toggle_requested)
-        delegate.delete_requested.connect(self.delete_requested)
-        delegate.rename_committed.connect(self.rename_requested)
-        self.list_view.setItemDelegate(delegate)
+        self._delegate = TagRowDelegate(
+            self.list_view, self.list_view, show_shortcuts=show_shortcuts
+        )
+        self._delegate.toggle_requested.connect(self.toggle_requested)
+        self._delegate.delete_requested.connect(self.delete_requested)
+        self._delegate.rename_committed.connect(self.rename_requested)
+        self.list_view.setItemDelegate(self._delegate)
 
         title_label = QLabel(title.upper())
         title_label.setObjectName("panelTitle")
@@ -109,6 +113,12 @@ class TagPanel(QWidget):
     def focus_search(self) -> None:
         self.search_box.setFocus()
         self.search_box.selectAll()
+
+    def set_shortcut_mode_selected(self, selected: bool) -> None:
+        """Only meaningful for a panel constructed with `show_shortcuts`;
+        a no-op otherwise since the delegate never reads the flag it'd
+        set."""
+        self._delegate.set_show_checked_shortcuts(selected)
 
     def _unchecked_matches(self, query: str) -> list[Tag]:
         query = query.strip().lower()

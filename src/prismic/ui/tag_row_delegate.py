@@ -17,6 +17,15 @@ icon calls `view.edit(index)`, and `setModelData` emits `rename_committed`
 instead of writing into the model, since `TagListModel` is deliberately
 display-only (see its docstring) -- the owning `TagPanel`/`MainWindow`
 dispatches the actual `TagRenameCommand` and repopulates the model.
+
+`show_shortcuts=True` (only ever passed for the item-tags panel's
+instance) paints the digit `TagListModel` already computed for this row
+into the checkbox itself -- painting only, no key handling here at all;
+`KeyboardController`/`MainWindow` own resolving a pressed digit back to a
+tag_id via the model's own `tag_id_for_shortcut()`, the same lookup this
+delegate's numbers are drawn from, so there's one shared source of truth
+for "what does this digit mean right now" between the paint and the
+keypress.
 """
 
 from __future__ import annotations
@@ -44,7 +53,7 @@ from PySide6.QtWidgets import (
 )
 
 from prismic.ui import theme
-from prismic.ui.tag_model import CheckedRole, TagIdRole
+from prismic.ui.tag_model import CheckedRole, CheckedShortcutRole, TagIdRole, UncheckedShortcutRole
 
 _Index = QModelIndex | QPersistentModelIndex
 
@@ -52,6 +61,7 @@ _ROW_HEIGHT = 32
 _CHECKBOX_SIZE = 14
 _ICON_SIZE = 18
 _PAD = 8
+_SHORTCUT_DIGIT_PIXEL_SIZE = 9  # small enough to fit inside a 14px checkbox
 
 
 class TagRowDelegate(QStyledItemDelegate):
@@ -59,9 +69,26 @@ class TagRowDelegate(QStyledItemDelegate):
     delete_requested = Signal(int)  # tag_id
     rename_committed = Signal(int, str)  # tag_id, new_name
 
-    def __init__(self, list_view: QListView, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, list_view: QListView, parent: QWidget | None = None, *, show_shortcuts: bool = False
+    ) -> None:
         super().__init__(parent)
         self._list_view = list_view
+        # Only the item-tags ("Edit this file") panel's delegate is
+        # constructed with this True -- the filter panel shows no numbers
+        # at all, per MainWindow's wiring.
+        self._show_shortcuts = show_shortcuts
+        # Which side of the checked/unchecked split currently gets numbers
+        # -- flipped by MainWindow when Ctrl is tapped alone, independent
+        # of any row's own hover/paint state, hence a settable attribute
+        # rather than something derived per-paint.
+        self._show_checked_shortcuts = False
+
+    def set_show_checked_shortcuts(self, value: bool) -> None:
+        if value == self._show_checked_shortcuts:
+            return
+        self._show_checked_shortcuts = value
+        self._list_view.viewport().update()
 
     def sizeHint(self, option: QStyleOptionViewItem, index: _Index) -> QSize:
         return QSize(option.rect.width(), _ROW_HEIGHT)
@@ -117,6 +144,12 @@ class TagRowDelegate(QStyledItemDelegate):
             painter.setPen(QPen(QColor(theme.BORDER), 1.5))
             painter.drawPath(checkbox_path)
 
+        if self._show_shortcuts:
+            role = CheckedShortcutRole if self._show_checked_shortcuts else UncheckedShortcutRole
+            digit = index.data(role)
+            if isinstance(digit, int):
+                self._paint_shortcut_digit(painter, checkbox_rect, digit)
+
         text_right = rename_rect.x() - _PAD if hovered else rect.right() - _PAD
         text_rect = QRect(
             checkbox_rect.right() + _PAD,
@@ -158,6 +191,17 @@ class TagRowDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(cx - 4, cy - 3, 8, 8, 1, 1)
             painter.drawLine(cx - 1, cy - 1, cx - 1, cy + 3)
             painter.drawLine(cx + 1, cy - 1, cx + 1, cy + 3)
+
+    def _paint_shortcut_digit(self, painter: QPainter, checkbox_rect: QRect, digit: int) -> None:
+        # One consistent green regardless of the checkbox's own outlined
+        # (unchecked) or filled (checked) look -- not tuned separately per
+        # background, since that look is due for a revisit anyway.
+        painter.setPen(QPen(QColor(theme.KEYCAP_BORDER)))
+        font = painter.font()
+        font.setPixelSize(_SHORTCUT_DIGIT_PIXEL_SIZE)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(checkbox_rect, Qt.AlignmentFlag.AlignCenter, str(digit))
 
     def editorEvent(
         self,
