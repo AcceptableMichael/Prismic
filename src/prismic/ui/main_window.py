@@ -54,7 +54,7 @@ from prismic.ui.hover_hint import HoverHintController
 from prismic.ui.instance_bridge import InstanceBridge, request_focus
 from prismic.ui.keyboard import DIGIT_KEYS, KeyboardController
 from prismic.ui.result_model import MediaIdRole, ResultListModel
-from prismic.ui.tag_model import CheckedShortcutRole, UncheckedShortcutRole
+from prismic.ui.tag_model import CheckedRole, CheckedShortcutRole, UncheckedShortcutRole
 from prismic.ui.tag_panel import TagPanel
 from prismic.ui.thumbnail_delegate import ThumbnailDelegate
 from prismic.ui.thumbnail_provider import ThumbnailProvider
@@ -614,16 +614,26 @@ class MainWindow(QMainWindow):
         if row is None:
             self._hover_bar.clear()
             return
+        model = self.item_tag_panel.model
+        index = model.index(row, 0)
         role = (
             CheckedShortcutRole
             if self._tag_shortcut_mode_action.isChecked()
             else UncheckedShortcutRole
         )
-        digit = self.item_tag_panel.model.data(self.item_tag_panel.model.index(row, 0), role)
+        digit = model.data(index, role)
         if not isinstance(digit, int):
-            self._hover_bar.show_hint(("Ctrl",), "Toggle quick select shortcuts")
+            # No digit for this row, either because its group (selected vs.
+            # unselected -- independent of which one Ctrl currently numbers)
+            # isn't the numbered one, or because it's past the first 10 tags
+            # in a group that is. Either way, "Ctrl" only ever *moves* the
+            # numbering to a row's own group -- it doesn't add a shortcut to
+            # this specific row -- so the hint names that row's own group,
+            # not whichever group Ctrl would take shortcuts away from.
+            group = "selected" if model.data(index, CheckedRole) else "unselected"
+            self._hover_bar.show_hint(("Ctrl",), f"Move quick-select shortcuts to {group} tags")
             return
-        tag = self.item_tag_panel.model.tag_at(row)
+        tag = model.tag_at(row)
         self._hover_bar.show_hint((str(digit),), f'Toggle "{tag.name}" on the current item')
 
     def _on_item_create_and_check(self, name: str) -> None:

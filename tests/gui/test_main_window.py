@@ -230,13 +230,15 @@ def test_item_tag_hover_shows_digit_hint_within_the_shortcut_group(
     assert window._hover_bar._text_label.text() == 'Toggle "vacation" on the current item'
 
 
-def test_item_tag_hover_shows_ctrl_hint_past_the_shortcut_group(
+def test_item_tag_hover_past_the_shortcut_group_names_that_row_s_own_group(
     qtbot: QtBot, window: MainWindow, collection_dir: Path
 ) -> None:
     """Past the first 10 unchecked tags, rows no longer carry a shortcut
     digit (see `_shortcut_digit_for_position`) -- hovering one of those
-    should point at "Ctrl", the key that toggles quick-select shortcuts
-    on/off, rather than going silent."""
+    should point at "Ctrl" with a hint naming *this row's own* group
+    (unselected), not the group Ctrl would actually take shortcuts away
+    from (selected) -- Ctrl only ever moves numbering to a row's own
+    group, it can never add a digit to this specific overflow row."""
     _open_and_wait(qtbot, window, collection_dir)
     for i in range(11):
         window._on_tag_create(f"tag{i:02d}")
@@ -245,7 +247,31 @@ def test_item_tag_hover_shows_ctrl_hint_past_the_shortcut_group(
     window._on_item_tag_hover(10)  # 11th row -- past the 0..9 shortcut group
 
     assert [label.text() for label in window._hover_bar._key_labels] == ["Ctrl"]
-    assert window._hover_bar._text_label.text() == "Toggle quick select shortcuts"
+    assert (
+        window._hover_bar._text_label.text() == "Move quick-select shortcuts to unselected tags"
+    )
+
+
+def test_item_tag_hover_over_selected_group_names_selected_tags(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    """By default shortcuts number the *unselected* group, so a selected
+    (checked) tag never shows a digit -- hovering it should say Ctrl
+    would move shortcuts to "selected tags", not the generic/wrong
+    "unselected tags" text a mode-based (rather than row-based) check
+    would produce."""
+    _open_and_wait(qtbot, window, collection_dir)
+    window._on_tag_create("vacation")
+    tag = window.session.tags.list_all()[0]  # type: ignore[union-attr]
+    current_id = window.session.state.result_set[0]  # type: ignore[union-attr]
+    window.session.state.current_item = current_id  # type: ignore[union-attr]
+    window._on_item_tag_toggle(tag.id)  # select it -- moves it into the checked group
+    window._refresh_all()
+
+    window._on_item_tag_hover(0)
+
+    assert [label.text() for label in window._hover_bar._key_labels] == ["Ctrl"]
+    assert window._hover_bar._text_label.text() == "Move quick-select shortcuts to selected tags"
 
 
 def test_recently_clicked_tag_floats_to_the_top_of_both_panels(
