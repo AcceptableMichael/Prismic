@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
             on_undo=self._undo,
             on_focus_item_tags=self.item_tag_panel.focus_search,
             on_toggle_tag_by_index=self._toggle_tag_by_index,
+            on_toggle_focus_mode=self._toggle_focus_mode,
             on_chord_status_changed=self._transient_bar.show_message,
             parent=self,
         )
@@ -152,11 +153,11 @@ class MainWindow(QMainWindow):
         self.filter_panel.rename_requested.connect(self._on_tag_rename)
         self.filter_panel.delete_requested.connect(self._on_tag_delete)
 
-        tag_splitter = QSplitter(Qt.Orientation.Vertical)
-        tag_splitter.addWidget(self.item_tag_panel)
-        tag_splitter.addWidget(self.filter_panel)
-        tag_splitter.setSizes([1, 1])
-        tag_splitter.setHandleWidth(1)
+        self._tag_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._tag_splitter.addWidget(self.item_tag_panel)
+        self._tag_splitter.addWidget(self.filter_panel)
+        self._tag_splitter.setSizes([1, 1])
+        self._tag_splitter.setHandleWidth(1)
 
         self.thumbnail_provider = ThumbnailProvider(self)
         self.thumbnail_provider.thumbnail_ready.connect(self._on_thumbnail_ready)
@@ -184,7 +185,7 @@ class MainWindow(QMainWindow):
         self.viewer.load_error.connect(self._on_viewer_error)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(tag_splitter)
+        splitter.addWidget(self._tag_splitter)
         splitter.addWidget(self.result_list)
         splitter.addWidget(self.viewer)
         splitter.setSizes([190, 260, 830])
@@ -262,6 +263,23 @@ class MainWindow(QMainWindow):
             "Toggle thumbnail previews in the results list",
         )
 
+        self._focus_mode_action = QAction("Focus Mode", self)
+        self._focus_mode_action.setCheckable(True)
+        # No QKeySequence shortcut here on purpose -- Space is dispatched
+        # through KeyboardController instead (see keyboard.py's module
+        # docstring for why: a QShortcut here would collide with the
+        # viewer's own Space-to-play/pause button shortcut and go
+        # ambiguous -- silently firing neither -- whenever a video happens
+        # to be showing).
+        self._focus_mode_action.toggled.connect(self._apply_focus_mode)
+        view_menu.addAction(self._focus_mode_action)
+        self._hover_hints.register_action(
+            self._focus_mode_action,
+            view_menu,
+            ("Space",),
+            "Hide every panel except the media viewer",
+        )
+
     # -- Session lifecycle --------------------------------------------------
 
     def _prompt_open_folder(self) -> None:
@@ -277,6 +295,7 @@ class MainWindow(QMainWindow):
             self.open_collection(Path(file_path))
 
     def open_collection(self, path: Path, *, is_startup: bool = False) -> None:
+        self._focus_mode_action.setChecked(False)
         if self.session is not None:
             self.session.close()
             self.session = None
@@ -610,6 +629,23 @@ class MainWindow(QMainWindow):
         self.result_list.reset()
         self._sync_result_selection()
 
+    def _toggle_focus_mode(self) -> None:
+        self._focus_mode_action.setChecked(not self._focus_mode_action.isChecked())
+
+    def _apply_focus_mode(self, checked: bool) -> None:
+        """Hide (or restore) every panel except the media viewer itself.
+
+        The viewer widget is left alone -- including its own video
+        play/pause controls, which stay wherever they'd normally be. This
+        only hides the browsing/tagging chrome around it: the tag panels,
+        the result list, and the menu/status bars.
+        """
+        visible = not checked
+        self._tag_splitter.setVisible(visible)
+        self.result_list.setVisible(visible)
+        self.menuBar().setVisible(visible)
+        self.statusBar().setVisible(visible)
+
     def _toggle_tag_by_index(self, index: int) -> None:
         if self.session is None:
             return
@@ -638,10 +674,21 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
-            if event.key() == Qt.Key.Key_Escape and self._focus_is_text_editing():
-                self._dismiss_typing_focus()
-                event.accept()
-                return True
+            if event.key() == Qt.Key.Key_Escape:
+                handled = False
+                if self._focus_is_text_editing():
+                    self._dismiss_typing_focus()
+                    handled = True
+                if self._focus_mode_action.isChecked():
+                    # The reliable way out of focus mode -- Space alone
+                    # can't be, since it's claimed by the viewer's own
+                    # play/pause shortcut whenever a video is showing (see
+                    # keyboard.py's module docstring).
+                    self._focus_mode_action.setChecked(False)
+                    handled = True
+                if handled:
+                    event.accept()
+                    return True
             if event.key() == Qt.Key.Key_Tab and self._cycle_tag_search_focus():
                 event.accept()
                 return True

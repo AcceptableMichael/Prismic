@@ -22,6 +22,18 @@ calling into here, and while focus is in either tag search box, redirects
 it to the other one directly (Qt's tab-order chain turns out not to be
 able to represent a closed 2-widget loop -- see `_cycle_tag_search_focus`
 for why plain `setTabOrder` doesn't work for this).
+
+Space is deliberately *not* bound here as a `QShortcut` the way the
+viewer's play/pause button binds it -- it's dispatched as a plain
+`GLOBAL_COMMAND` key instead, which only ever runs when Qt delivers an
+actual `KeyPress` event to this controller. While a video is showing, the
+play/pause button's own Space shortcut is what's visible/enabled, and Qt's
+shortcut map consumes the key before a `KeyPress` is ever delivered at
+all -- so `on_toggle_focus_mode` naturally never fires in that case, and
+the two Space behaviors don't collide. (Escape is `MainWindow`'s fallback
+out of focus mode for exactly the case this creates: entering focus mode
+while viewing an image, then navigating to a video, leaves Space bound to
+play/pause with no way back via this controller alone.)
 """
 
 from __future__ import annotations
@@ -55,6 +67,7 @@ class KeyboardController(QObject):
         on_undo: Callable[[], None],
         on_focus_item_tags: Callable[[], None],
         on_toggle_tag_by_index: Callable[[int], None],
+        on_toggle_focus_mode: Callable[[], None],
         on_chord_status_changed: Callable[[str], None],
         parent: QObject | None = None,
     ) -> None:
@@ -69,6 +82,7 @@ class KeyboardController(QObject):
         self._on_undo = on_undo
         self._on_focus_item_tags = on_focus_item_tags
         self._on_toggle_tag_by_index = on_toggle_tag_by_index
+        self._on_toggle_focus_mode = on_toggle_focus_mode
         self._on_chord_status_changed = on_chord_status_changed
 
         self._resolver = InputResolver()
@@ -130,6 +144,9 @@ class KeyboardController(QObject):
         if event.key == "Tab":
             self._on_focus_item_tags()
             return True
+        if event.key == "Space":
+            self._on_toggle_focus_mode()
+            return True
         if event.key == "t":
             self._chord.press("t")
             self._chord_timer.start(int(_CHORD_TIMEOUT_SECONDS * 1000))
@@ -171,6 +188,8 @@ def _key_text(event: QKeyEvent) -> str | None:
         return "Down"
     if key == Qt.Key.Key_Tab:
         return "Tab"
+    if key == Qt.Key.Key_Space:
+        return "Space"
     if key == Qt.Key.Key_Escape:
         return "Escape"
     if key == Qt.Key.Key_Z and modifiers & Qt.KeyboardModifier.ControlModifier:

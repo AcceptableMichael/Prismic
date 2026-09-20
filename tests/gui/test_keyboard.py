@@ -246,3 +246,53 @@ def test_navigation_still_works_when_the_result_list_has_focus(
     qtbot.keyClick(window.result_list, Qt.Key.Key_Right)
 
     assert session.state.current_item == second_id
+
+
+def test_space_toggles_focus_mode_hiding_every_panel_but_the_viewer(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    assert window.result_list.isVisible()
+    assert window._tag_splitter.isVisible()
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Space)
+
+    assert window._focus_mode_action.isChecked() is True
+    assert window.result_list.isVisible() is False
+    assert window._tag_splitter.isVisible() is False
+    assert window.menuBar().isVisible() is False
+    assert window.statusBar().isVisible() is False
+    assert window.viewer.isVisible()  # the one thing that stays
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Space)
+
+    assert window._focus_mode_action.isChecked() is False
+    assert window.result_list.isVisible()
+    assert window._tag_splitter.isVisible()
+
+
+def test_escape_exits_focus_mode(qtbot: QtBot, window: MainWindow) -> None:
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Space)
+    assert window._focus_mode_action.isChecked() is True
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Escape)
+
+    assert window._focus_mode_action.isChecked() is False
+    assert window.result_list.isVisible()
+
+
+def test_opening_a_collection_resets_focus_mode(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Space)
+    assert window._focus_mode_action.isChecked() is True
+
+    window.open_collection(collection_dir)
+
+    assert window._focus_mode_action.isChecked() is False
+    assert window.result_list.isVisible()
