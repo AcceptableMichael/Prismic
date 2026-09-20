@@ -189,9 +189,11 @@ def test_global_shortcuts_still_work_when_the_result_list_has_focus(
     `test_main_window.py`. A second "Tab", once focus is already inside
     that box, cycles to the filter search box instead -- that redirect is
     `MainWindow.eventFilter`/`_cycle_tag_search_focus`'s doing, checked
-    ahead of ever calling into `KeyboardController`, which is why the
-    second key press below goes to the search box itself rather than back
-    to the result list."""
+    ahead of ever calling into `KeyboardController`. A third "Tab" is a
+    hidden third step in that cycle: it dismisses typing focus back to the
+    result list rather than looping straight back to the first box, so a
+    Tab-Tab-Tab burst always ends up not typing, instead of still typing in
+    a different search box."""
     window.result_list.setFocus()
     qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
 
@@ -205,7 +207,29 @@ def test_global_shortcuts_still_work_when_the_result_list_has_focus(
 
     qtbot.keyClick(window.filter_panel.search_box, Qt.Key.Key_Tab)
 
-    assert window.item_tag_panel.search_box.hasFocus()  # cycles back
+    assert window.result_list.hasFocus()  # dismissed, not cycled back
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Tab)
+
+    assert window.item_tag_panel.search_box.hasFocus()  # loop starts over
+
+
+def test_escape_dismisses_typing_focus_from_either_search_box(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.item_tag_panel.search_box, Qt.Key.Key_Escape)
+
+    assert window.result_list.hasFocus()
+
+    window.filter_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.filter_panel.search_box.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.filter_panel.search_box, Qt.Key.Key_Escape)
+
+    assert window.result_list.hasFocus()
 
 
 def test_navigation_still_works_when_the_result_list_has_focus(

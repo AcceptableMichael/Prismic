@@ -638,6 +638,10 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
+            if event.key() == Qt.Key.Key_Escape and self._focus_is_text_editing():
+                self._dismiss_typing_focus()
+                event.accept()
+                return True
             if event.key() == Qt.Key.Key_Tab and self._cycle_tag_search_focus():
                 event.accept()
                 return True
@@ -649,15 +653,20 @@ class MainWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def _cycle_tag_search_focus(self) -> bool:
-        """If focus is currently in one of the two tag search boxes, move
-        it to the other one and report the key as handled.
+        """If focus is currently in one of the two tag search boxes, advance
+        it around a 3-step loop: item-tag box -> filter box -> dismissed
+        (back to the result list) -> item-tag box -> ... Report the key as
+        handled for the first two steps; the third is a plain Tab-out, left
+        to Qt's own focus handling instead of forced onto the result list,
+        since the loop should end at "no longer typing," not at any one
+        specific widget.
 
         Handled here, as a direct widget-identity check, rather than via
         `QWidget.setTabOrder`: Qt's tab-order chain is one single shared
         list for the whole window, and `setTabOrder(A, B)` only repositions
-        a pair *within* it -- it can't carve out a closed 2-widget loop
-        excluding every other focusable widget, which is what "Tab between
-        just these two boxes" actually requires. Confirmed by trying it:
+        a pair *within* it -- it can't carve out a closed loop excluding
+        every other focusable widget, which is what "Tab between just these
+        two boxes, then out" actually requires. Confirmed by trying it:
         `setTabOrder(A, B)` then `setTabOrder(B, A)` leaves A pointing at
         whatever followed B beforehand, not back at B."""
         focused = QApplication.focusWidget()
@@ -665,9 +674,15 @@ class MainWindow(QMainWindow):
             self.filter_panel.search_box.setFocus()
             return True
         if focused is self.filter_panel.search_box:
-            self.item_tag_panel.search_box.setFocus()
+            self._dismiss_typing_focus()
             return True
         return False
+
+    def _dismiss_typing_focus(self) -> None:
+        """Move focus off whatever text box currently has it and back to
+        the result list -- the same "immediately keyboard-driven" default
+        focus target `open_collection` sets on startup."""
+        self.result_list.setFocus()
 
     @staticmethod
     def _focus_is_text_editing() -> bool:
