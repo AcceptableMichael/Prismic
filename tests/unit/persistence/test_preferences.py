@@ -1,4 +1,10 @@
-from prismic.persistence.preferences import preferences_directory, preferences_file_path
+from pathlib import Path
+
+from prismic.persistence.preferences import (
+    PreferencesStore,
+    preferences_directory,
+    preferences_file_path,
+)
 
 
 def test_preferences_directory_is_named_after_the_app() -> None:
@@ -13,3 +19,51 @@ def test_preferences_location_is_outside_any_collection() -> None:
     # It's app-wide state, not per-collection — it must never live under a
     # collection root, unlike the `.prismic` database file.
     assert preferences_file_path().suffix != ".prismic"
+
+
+def test_store_returns_nothing_when_the_file_does_not_exist(tmp_path: Path) -> None:
+    assert PreferencesStore(tmp_path / "absent.json").load() == {}
+
+
+def test_store_round_trips_what_it_saved(tmp_path: Path) -> None:
+    store = PreferencesStore(tmp_path / "preferences.json")
+
+    store.save({"shortcuts": {"view.focus_mode": "F8"}})
+
+    assert store.load() == {"shortcuts": {"view.focus_mode": "F8"}}
+
+
+def test_store_creates_the_preferences_directory_on_first_save(tmp_path: Path) -> None:
+    store = PreferencesStore(tmp_path / "nested" / "deeper" / "preferences.json")
+
+    store.save({"a": 1})
+
+    assert store.path.exists()
+
+
+def test_store_treats_a_corrupt_file_as_empty(tmp_path: Path) -> None:
+    """Preferences are conveniences, not authoritative data -- a file
+    mangled by a hand edit costs the user their settings, but must not
+    stop the app from starting."""
+    path = tmp_path / "preferences.json"
+    path.write_text("{ this is not json", encoding="utf-8")
+
+    assert PreferencesStore(path).load() == {}
+
+
+def test_store_treats_a_non_object_file_as_empty(tmp_path: Path) -> None:
+    path = tmp_path / "preferences.json"
+    path.write_text("[1, 2, 3]", encoding="utf-8")
+
+    assert PreferencesStore(path).load() == {}
+
+
+def test_store_leaves_no_temporary_file_behind(tmp_path: Path) -> None:
+    """The atomic-replace write goes through a `.tmp` sibling; a leftover
+    one would sit next to the user's preferences forever."""
+    directory = tmp_path / "prefs-only"
+    store = PreferencesStore(directory / "preferences.json")
+
+    store.save({"a": 1})
+
+    assert sorted(p.name for p in directory.iterdir()) == ["preferences.json"]

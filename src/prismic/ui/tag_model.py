@@ -12,40 +12,43 @@ painted and clicked via `TagRowDelegate`/`TagPanel`, which read `TagIdRole`
 and `CheckedRole` here and emit their own signals rather than writing back
 through this model -- there is deliberately no `setData()`.
 
-`UncheckedShortcutRole`/`CheckedShortcutRole` are computed here too (once,
-in `set_tags()`) for the same reason `CheckedRole` is: this is the one
-place that already knows each tag's checked state and the order it's
-displayed in, so it's the natural place to number "the Nth unchecked tag"
-without a second component re-deriving that split. Both roles are always
-populated regardless of which panel this model backs -- the filter panel's
-delegate just never reads them, since only the item-tags panel shows
-shortcut numbers (see `MainWindow`).
+`UncheckedSlotRole`/`CheckedSlotRole` are computed here too (once, in
+`set_tags()`) for the same reason `CheckedRole` is: this is the one place
+that already knows each tag's checked state and the order it's displayed
+in, so it's the natural place to number "the Nth unchecked tag" without a
+second component re-deriving that split. Both roles are always populated
+regardless of which panel this model backs -- the filter panel's delegate
+just never reads them, since only the item-tags panel shows shortcut
+numbers (see `MainWindow`).
+
+They hold a quick-select *slot* (0-based position within the numbered
+group), not the key that triggers it: which key that is comes from
+`ShortcutBindings`, since every quick-select shortcut is individually
+rebindable in Settings. Keeping the model on slots means rebinding one
+never touches this file.
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, QPersistentModelIndex, Qt
 
+from prismic.application.input.shortcuts import QUICK_SELECT_SLOT_COUNT
 from prismic.domain.tag import Tag
 
 _Index = QModelIndex | QPersistentModelIndex
 
 TagIdRole = Qt.ItemDataRole.UserRole + 1
 CheckedRole = Qt.ItemDataRole.UserRole + 2
-# The digit (0-9) that toggles this tag when the item-tags panel's shortcut
-# numbering is limited to unchecked (or checked) tags -- None past the
-# first 10 tags in that state, or when this tag isn't in that state at
-# all. See `_shortcut_digit_for_position` for the 1..9-then-0 ordering.
-UncheckedShortcutRole = Qt.ItemDataRole.UserRole + 3
-CheckedShortcutRole = Qt.ItemDataRole.UserRole + 4
+# The quick-select slot (0-based) this tag occupies when the item-tags
+# panel's shortcut numbering is limited to unchecked (or checked) tags --
+# None past `QUICK_SELECT_SLOT_COUNT` tags in that state, or when this tag
+# isn't in that state at all.
+UncheckedSlotRole = Qt.ItemDataRole.UserRole + 3
+CheckedSlotRole = Qt.ItemDataRole.UserRole + 4
 
 
-def _shortcut_digit_for_position(position: int) -> int | None:
-    if position < 9:
-        return position + 1
-    if position == 9:
-        return 0
-    return None
+def _slot_for_position(position: int) -> int | None:
+    return position if position < QUICK_SELECT_SLOT_COUNT else None
 
 
 class TagListModel(QAbstractListModel):
@@ -53,39 +56,38 @@ class TagListModel(QAbstractListModel):
         super().__init__(parent)
         self._tags: list[Tag] = []
         self._selected_tag_ids: frozenset[int] = frozenset()
-        self._unchecked_shortcuts: dict[int, int] = {}
-        self._checked_shortcuts: dict[int, int] = {}
+        self._unchecked_slots: dict[int, int] = {}
+        self._checked_slots: dict[int, int] = {}
 
     def set_tags(self, tags: list[Tag], selected_tag_ids: frozenset[int]) -> None:
         self.beginResetModel()
         self._tags = tags
         self._selected_tag_ids = selected_tag_ids
-        self._unchecked_shortcuts = {}
-        self._checked_shortcuts = {}
+        self._unchecked_slots = {}
+        self._checked_slots = {}
         unchecked_count = 0
         checked_count = 0
         for tag in tags:
             if tag.id in selected_tag_ids:
-                digit = _shortcut_digit_for_position(checked_count)
-                if digit is not None:
-                    self._checked_shortcuts[tag.id] = digit
+                slot = _slot_for_position(checked_count)
+                if slot is not None:
+                    self._checked_slots[tag.id] = slot
                 checked_count += 1
             else:
-                digit = _shortcut_digit_for_position(unchecked_count)
-                if digit is not None:
-                    self._unchecked_shortcuts[tag.id] = digit
+                slot = _slot_for_position(unchecked_count)
+                if slot is not None:
+                    self._unchecked_slots[tag.id] = slot
                 unchecked_count += 1
         self.endResetModel()
 
-    def tag_id_for_shortcut(self, digit: int, *, selected: bool) -> int | None:
-        """The tag currently bound to `digit` in the unchecked (or, with
-        `selected=True`, checked) shortcut numbering -- the same mapping
-        `data()` exposes per-row via `UncheckedShortcutRole`/
-        `CheckedShortcutRole`, as one reverse lookup instead of a scan over
-        every row."""
-        table = self._checked_shortcuts if selected else self._unchecked_shortcuts
-        for tag_id, bound_digit in table.items():
-            if bound_digit == digit:
+    def tag_id_for_slot(self, slot: int, *, selected: bool) -> int | None:
+        """The tag currently occupying quick-select `slot` in the unchecked
+        (or, with `selected=True`, checked) numbering -- the same mapping
+        `data()` exposes per-row via `UncheckedSlotRole`/`CheckedSlotRole`,
+        as one reverse lookup instead of a scan over every row."""
+        table = self._checked_slots if selected else self._unchecked_slots
+        for tag_id, bound_slot in table.items():
+            if bound_slot == slot:
                 return tag_id
         return None
 
@@ -113,10 +115,10 @@ class TagListModel(QAbstractListModel):
             return tag.id
         if role == CheckedRole:
             return tag.id in self._selected_tag_ids
-        if role == UncheckedShortcutRole:
-            return self._unchecked_shortcuts.get(tag.id)
-        if role == CheckedShortcutRole:
-            return self._checked_shortcuts.get(tag.id)
+        if role == UncheckedSlotRole:
+            return self._unchecked_slots.get(tag.id)
+        if role == CheckedSlotRole:
+            return self._checked_slots.get(tag.id)
         return None
 
     def flags(self, index: _Index) -> Qt.ItemFlag:

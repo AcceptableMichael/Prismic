@@ -1,0 +1,241 @@
+from pathlib import Path
+
+import pytest
+
+from prismic.application.input import shortcuts
+from prismic.application.input.shortcuts import (
+    SHORTCUTS,
+    ShortcutBindings,
+    ShortcutKind,
+    ShortcutScope,
+    keycaps,
+)
+from prismic.persistence.preferences import PreferencesStore
+
+
+@pytest.fixture
+def bindings(tmp_path: Path) -> ShortcutBindings:
+    return ShortcutBindings(PreferencesStore(tmp_path / "preferences.json"))
+
+
+# -- The registry itself ----------------------------------------------------
+
+
+def test_every_shortcut_id_is_unique() -> None:
+    ids = [definition.id for definition in SHORTCUTS]
+    assert len(ids) == len(set(ids))
+
+
+def test_every_shortcut_has_a_label_and_a_description() -> None:
+    """Settings renders both verbatim -- an empty one would ship a blank
+    row rather than fail anywhere."""
+    for definition in SHORTCUTS:
+        assert definition.label.strip(), definition.id
+        assert definition.description.strip(), definition.id
+
+
+def test_categories_group_contiguously() -> None:
+    """Settings starts a new heading each time the category changes while
+    walking `SHORTCUTS` in order, so a category that reappears after
+    another one would render as two separate headings with the same
+    name."""
+    seen: list[str] = []
+    for definition in SHORTCUTS:
+        if not seen or seen[-1] != definition.category:
+            assert definition.category not in seen, definition.category
+            seen.append(definition.category)
+
+
+def test_defaults_do_not_collide_within_a_scope(bindings: ShortcutBindings) -> None:
+    for definition in SHORTCUTS:
+        assert bindings.conflicts(definition.id, definition.default) == (), definition.id
+
+
+def test_focus_mode_and_play_pause_share_space_across_scopes(
+    bindings: ShortcutBindings,
+) -> None:
+    """The one deliberate double-booking in the defaults: both are Space,
+    resolved by input context rather than by the key (see keyboard.py).
+    Different scopes, so it isn't reported as a conflict."""
+    assert bindings.binding(shortcuts.FOCUS_MODE) == "Space"
+    assert bindings.binding(shortcuts.VIEWER_PLAY_PAUSE) == "Space"
+    assert bindings.conflicts(shortcuts.FOCUS_MODE, "Space") == ()
+
+
+def test_every_quick_select_slot_has_a_shortcut(bindings: ShortcutBindings) -> None:
+    for slot in range(shortcuts.QUICK_SELECT_SLOT_COUNT):
+        assert bindings.binding(shortcuts.quick_select_id(slot))
+
+
+def test_quick_select_defaults_are_the_digit_row(bindings: ShortcutBindings) -> None:
+    assert bindings.quick_select_slot("1") == 0
+    assert bindings.quick_select_slot("9") == 8
+    assert bindings.quick_select_slot("0") == 9
+    assert bindings.quick_select_slot("Ctrl+1") is None
+
+
+# -- keycaps ------------------------------------------------------------------
+
+
+def test_keycaps_splits_a_combination_into_one_label_per_key() -> None:
+    assert keycaps("Ctrl+Shift+O") == ("Ctrl", "Shift", "O")
+    assert keycaps("Space") == ("Space",)
+
+
+def test_keycaps_of_an_unbound_shortcut_is_empty() -> None:
+    assert keycaps("") == ()
+
+
+def test_keycaps_handles_the_plus_key_itself() -> None:
+    """A naive split on "+" turns "Ctrl++" into an empty trailing segment
+    instead of the "+" key it actually names."""
+    assert keycaps("Ctrl++") == ("Ctrl", "+")
+
+
+# -- Reading and writing bindings --------------------------------------------
+
+
+def test_an_untouched_shortcut_reports_its_default(bindings: ShortcutBindings) -> None:
+    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
+    assert bindings.is_default(shortcuts.RESCAN)
+
+
+def test_setting_a_binding_overrides_the_default(bindings: ShortcutBindings) -> None:
+    bindings.set_binding(shortcuts.RESCAN, "F5")
+
+    assert bindings.binding(shortcuts.RESCAN) == "F5"
+    assert not bindings.is_default(shortcuts.RESCAN)
+
+
+def test_setting_a_binding_back_to_its_default_clears_the_override(
+    bindings: ShortcutBindings,
+) -> None:
+    bindings.set_binding(shortcuts.RESCAN, "F5")
+
+    bindings.set_binding(shortcuts.RESCAN, "Ctrl+R")
+
+    assert bindings.is_default(shortcuts.RESCAN)
+
+
+def test_reset_restores_the_default(bindings: ShortcutBindings) -> None:
+    bindings.set_binding(shortcuts.RESCAN, "F5")
+
+    bindings.reset(shortcuts.RESCAN)
+
+    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
+
+
+def test_reset_all_restores_every_default(bindings: ShortcutBindings) -> None:
+    bindings.set_binding(shortcuts.RESCAN, "F5")
+    bindings.set_binding(shortcuts.NAVIGATE_NEXT, "F6")
+
+    bindings.reset_all()
+
+    assert all(bindings.is_default(definition.id) for definition in SHORTCUTS)
+
+
+def test_a_shortcut_can_be_unbound(bindings: ShortcutBindings) -> None:
+    bindings.set_binding(shortcuts.RESCAN, "")
+
+    assert bindings.binding(shortcuts.RESCAN) == ""
+    assert bindings.shortcut_for("") is None  # an unbound one is never "pressed"
+
+
+def test_shortcut_for_finds_the_command_a_key_triggers(bindings: ShortcutBindings) -> None:
+    assert bindings.shortcut_for("Ctrl+R") == shortcuts.RESCAN
+    assert bindings.shortcut_for("F5") is None
+
+    bindings.set_binding(shortcuts.RESCAN, "F5")
+
+    assert bindings.shortcut_for("F5") == shortcuts.RESCAN
+    assert bindings.shortcut_for("Ctrl+R") is None
+
+
+def test_shortcut_for_only_searches_the_requested_scope(bindings: ShortcutBindings) -> None:
+    assert bindings.shortcut_for("Space", ShortcutScope.GLOBAL) == shortcuts.FOCUS_MODE
+    assert bindings.shortcut_for("Space", ShortcutScope.VIEWER) == shortcuts.VIEWER_PLAY_PAUSE
+
+
+def test_conflicts_reports_another_shortcut_on_the_same_key(
+    bindings: ShortcutBindings,
+) -> None:
+    assert bindings.conflicts(shortcuts.RESCAN, "Ctrl+T") == (shortcuts.TOGGLE_THUMBNAILS,)
+
+
+def test_conflicts_ignores_the_shortcut_being_asked_about(bindings: ShortcutBindings) -> None:
+    assert bindings.conflicts(shortcuts.RESCAN, "Ctrl+R") == ()
+
+
+def test_the_swap_gesture_is_a_tap_modifier_not_a_key(bindings: ShortcutBindings) -> None:
+    definition = shortcuts.definition(shortcuts.SWAP_TAG_NUMBERING)
+    assert definition.kind is ShortcutKind.TAP_MODIFIER
+    assert definition.default in shortcuts.TAP_MODIFIER_CHOICES
+
+
+# -- Persistence ---------------------------------------------------------------
+
+
+def test_overrides_survive_a_reload(tmp_path: Path) -> None:
+    store = PreferencesStore(tmp_path / "preferences.json")
+    ShortcutBindings(store).set_binding(shortcuts.RESCAN, "F5")
+
+    assert ShortcutBindings(store).binding(shortcuts.RESCAN) == "F5"
+
+
+def test_only_overrides_are_written_not_the_whole_table(tmp_path: Path) -> None:
+    """So a changed default reaches everyone who hadn't customized that
+    particular shortcut, instead of being frozen at whatever the table
+    said the first time the app ran."""
+    store = PreferencesStore(tmp_path / "preferences.json")
+    bindings = ShortcutBindings(store)
+
+    bindings.set_binding(shortcuts.RESCAN, "F5")
+
+    assert store.load()["shortcuts"] == {shortcuts.RESCAN: "F5"}
+
+
+def test_resetting_the_last_override_removes_the_section_entirely(tmp_path: Path) -> None:
+    store = PreferencesStore(tmp_path / "preferences.json")
+    bindings = ShortcutBindings(store)
+    bindings.set_binding(shortcuts.RESCAN, "F5")
+
+    bindings.reset(shortcuts.RESCAN)
+
+    assert "shortcuts" not in store.load()
+
+
+def test_unrelated_preferences_are_left_alone(tmp_path: Path) -> None:
+    store = PreferencesStore(tmp_path / "preferences.json")
+    store.save({"something-else": 42})
+
+    ShortcutBindings(store).set_binding(shortcuts.RESCAN, "F5")
+
+    assert store.load()["something-else"] == 42
+
+
+def test_an_unknown_shortcut_id_in_the_file_is_ignored(tmp_path: Path) -> None:
+    """The preferences file is plain, hand-editable JSON -- a stale id
+    from an older build shouldn't crash startup or survive the next
+    save."""
+    store = PreferencesStore(tmp_path / "preferences.json")
+    store.save({"shortcuts": {"nope.not.a.shortcut": "F5", shortcuts.RESCAN: "F6"}})
+
+    bindings = ShortcutBindings(store)
+    bindings.set_binding(shortcuts.NAVIGATE_NEXT, "F7")
+
+    assert "nope.not.a.shortcut" not in store.load()["shortcuts"]
+    assert bindings.binding(shortcuts.RESCAN) == "F6"
+
+
+def test_a_non_string_binding_in_the_file_is_ignored(tmp_path: Path) -> None:
+    store = PreferencesStore(tmp_path / "preferences.json")
+    store.save({"shortcuts": {shortcuts.RESCAN: 5}})
+
+    assert ShortcutBindings(store).binding(shortcuts.RESCAN) == "Ctrl+R"
+
+
+def test_a_malformed_shortcuts_section_is_ignored(tmp_path: Path) -> None:
+    store = PreferencesStore(tmp_path / "preferences.json")
+    store.save({"shortcuts": "not a mapping"})
+
+    assert ShortcutBindings(store).binding(shortcuts.RESCAN) == "Ctrl+R"

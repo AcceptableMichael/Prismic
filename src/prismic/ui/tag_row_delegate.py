@@ -19,12 +19,13 @@ display-only (see its docstring) -- the owning `TagPanel`/`MainWindow`
 dispatches the actual `TagRenameCommand` and repopulates the model.
 
 `show_shortcuts=True` (only ever passed for the item-tags panel's
-instance) paints the digit `TagListModel` already computed for this row
+instance) paints the key bound to the quick-select slot `TagListModel`
+already computed for this row
 into the checkbox itself -- painting only, no key handling here at all;
-`KeyboardController`/`MainWindow` own resolving a pressed digit back to a
-tag_id via the model's own `tag_id_for_shortcut()`, the same lookup this
-delegate's numbers are drawn from, so there's one shared source of truth
-for "what does this digit mean right now" between the paint and the
+`KeyboardController`/`MainWindow` own resolving a pressed key back to a
+tag_id via the model's own `tag_id_for_slot()`, the same lookup this
+delegate's labels are drawn from, so there's one shared source of truth
+for "what does this key mean right now" between the paint and the
 keypress.
 """
 
@@ -53,13 +54,13 @@ from PySide6.QtWidgets import (
 )
 
 from prismic.ui import theme
-from prismic.ui.tag_model import CheckedRole, CheckedShortcutRole, TagIdRole, UncheckedShortcutRole
+from prismic.ui.tag_model import CheckedRole, CheckedSlotRole, TagIdRole, UncheckedSlotRole
 
 _Index = QModelIndex | QPersistentModelIndex
 
 _ROW_HEIGHT = 32
 # 1px taller than the checkbox otherwise needs, purely to give the
-# shortcut digit painted inside it (see _paint_shortcut_digit) a hair more
+# shortcut key painted inside it (see _paint_shortcut_key) a hair more
 # vertical room -- a plain AlignCenter in the original 14px box rendered
 # visibly off-center on the actual display (direction depended on which
 # rendering path was checked; a real screen and an offscreen grab
@@ -67,7 +68,13 @@ _ROW_HEIGHT = 32
 _CHECKBOX_SIZE = 15
 _ICON_SIZE = 18
 _PAD = 8
-_SHORTCUT_DIGIT_PIXEL_SIZE = 9  # small enough to fit inside the checkbox
+_SHORTCUT_KEY_PIXEL_SIZE = 9  # small enough to fit inside the checkbox
+# Quick-select keys are single characters by default, and the checkbox has
+# room for roughly two at this size. A user who rebinds one to something
+# longer ("F11", "Ctrl+Q") gets the tail end of it elided to fit rather
+# than a glyph spilling out of the box -- the full binding is always
+# legible in Settings and in the hover explainer either way.
+_SHORTCUT_KEY_MAX_CHARS = 2
 
 
 class TagRowDelegate(QStyledItemDelegate):
@@ -89,11 +96,24 @@ class TagRowDelegate(QStyledItemDelegate):
         # of any row's own hover/paint state, hence a settable attribute
         # rather than something derived per-paint.
         self._show_checked_shortcuts = False
+        # Slot -> the label painted in that slot's checkbox, pushed in by
+        # `MainWindow` whenever the bindings change. Empty until then, so
+        # a delegate built before any bindings exist simply paints no
+        # numbers rather than guessing at defaults that may be overridden.
+        self._shortcut_labels: dict[int, str] = {}
 
     def set_show_checked_shortcuts(self, value: bool) -> None:
         if value == self._show_checked_shortcuts:
             return
         self._show_checked_shortcuts = value
+        self._list_view.viewport().update()
+
+    def set_shortcut_labels(self, labels: dict[int, str]) -> None:
+        """Set which label each quick-select slot paints -- derived from
+        the user's current key bindings, not from the slot number."""
+        if labels == self._shortcut_labels:
+            return
+        self._shortcut_labels = dict(labels)
         self._list_view.viewport().update()
 
     def sizeHint(self, option: QStyleOptionViewItem, index: _Index) -> QSize:
@@ -151,10 +171,11 @@ class TagRowDelegate(QStyledItemDelegate):
             painter.drawPath(checkbox_path)
 
         if self._show_shortcuts:
-            role = CheckedShortcutRole if self._show_checked_shortcuts else UncheckedShortcutRole
-            digit = index.data(role)
-            if isinstance(digit, int):
-                self._paint_shortcut_digit(painter, checkbox_rect, digit)
+            role = CheckedSlotRole if self._show_checked_shortcuts else UncheckedSlotRole
+            slot = index.data(role)
+            label = self._shortcut_labels.get(slot) if isinstance(slot, int) else None
+            if label:
+                self._paint_shortcut_key(painter, checkbox_rect, label)
 
         text_right = rename_rect.x() - _PAD if hovered else rect.right() - _PAD
         text_rect = QRect(
@@ -198,7 +219,7 @@ class TagRowDelegate(QStyledItemDelegate):
             painter.drawLine(cx - 1, cy - 1, cx - 1, cy + 3)
             painter.drawLine(cx + 1, cy - 1, cx + 1, cy + 3)
 
-    def _paint_shortcut_digit(self, painter: QPainter, checkbox_rect: QRect, digit: int) -> None:
+    def _paint_shortcut_key(self, painter: QPainter, checkbox_rect: QRect, label: str) -> None:
         # save()/restore() bracket the font change specifically -- paint()'s
         # own save()/restore() at the call-site level wasn't enough, since
         # this runs *before* the tag-name text further down in the same
@@ -210,10 +231,12 @@ class TagRowDelegate(QStyledItemDelegate):
         # background, since that look is due for a revisit anyway.
         painter.setPen(QPen(QColor(theme.KEYCAP_BORDER)))
         font = painter.font()
-        font.setPixelSize(_SHORTCUT_DIGIT_PIXEL_SIZE)
+        font.setPixelSize(_SHORTCUT_KEY_PIXEL_SIZE)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(checkbox_rect, Qt.AlignmentFlag.AlignCenter, str(digit))
+        painter.drawText(
+            checkbox_rect, Qt.AlignmentFlag.AlignCenter, label[:_SHORTCUT_KEY_MAX_CHARS]
+        )
         painter.restore()
 
     def editorEvent(

@@ -1,78 +1,150 @@
 """Bridges real Qt key events onto the Phase 3 input-resolution scaffolding.
 
+No key is named in this file. `key_text()` turns a `QKeyEvent` into a
+portable key-sequence string ("Ctrl+Z", "Space", "Left", "1"), and
+everything downstream asks `ShortcutBindings` which command -- if any --
+that string is currently bound to. That indirection is what makes every
+shortcut user-configurable: rebinding one in Settings changes the lookup,
+not any code here. See `application/input/shortcuts.py` for the registry
+itself.
+
 Text-editing precedence is handled by Qt's own focus system, not
 reimplemented here: a focused `QLineEdit`/`QInputDialog` receives key events
 directly, so this controller's `handle_key_press` never runs the rest of its
 dispatch for those keys -- Qt delivers input to whatever's focused first,
-before it would ever reach the main window. Up/Down are a deliberate
-exception: they have no meaning in a single-line text field (unlike Left/
-Right, which move the caret), so result-list navigation stays reachable
-even while a tag search/rename box has focus -- see the `text_editing`
-branch below. Digit keys are a second, narrower exception -- see below.
+before it would ever reach the main window. The two "works while typing"
+navigation shortcuts are a deliberate exception: Up/Down (by default) have
+no meaning in a single-line text field, unlike Left/Right which move the
+caret, so result-list navigation stays reachable even while a tag search/
+rename box has focus -- see the `text_editing` branch below. Quick-select
+tag shortcuts are a second, narrower exception -- see below.
 
-Tab fires `on_focus_item_tags` immediately, right here, with no chord/
-timeout involved -- once focus actually lands in that search box (a
-QLineEdit), `text_editing` becomes true and this controller stops seeing
-Tab at all. What happens to it from there on is `MainWindow`'s doing, not
-this controller's: `MainWindow.eventFilter` checks for Tab ahead of ever
-calling into here, and while focus is in either tag search box, redirects
-it to the other one directly (Qt's tab-order chain turns out not to be
-able to represent a closed 2-widget loop -- see `_cycle_tag_search_focus`
-for why plain `setTabOrder` doesn't work for this).
+The tag-search cycle shortcut (Tab by default) fires immediately, in
+`MainWindow.eventFilter`, with no chord/timeout involved -- once focus
+actually lands in that search box (a QLineEdit), `text_editing` becomes
+true and this controller stops seeing it at all. What happens from there
+on is `MainWindow`'s doing: its event filter checks for that binding ahead
+of ever calling in here, and while focus is in either tag search box,
+redirects it to the other one directly (Qt's tab-order chain turns out not
+to be able to represent a closed 2-widget loop -- see
+`_cycle_tag_search_focus` for why plain `setTabOrder` doesn't work).
 
-Space is deliberately *not* bound here as a `QShortcut` the way the
-viewer's play/pause button binds it -- it's dispatched as a plain
+Focus mode is deliberately *not* bound here as a `QShortcut` the way the
+viewer's play/pause button binds its own -- it's dispatched as a plain
 `GLOBAL_COMMAND` key instead, which only ever runs when Qt delivers an
-actual `KeyPress` event to this controller. While a video is showing, the
-play/pause button's own Space shortcut is what's visible/enabled, and Qt's
-shortcut map consumes the key before a `KeyPress` is ever delivered at
-all -- so `on_toggle_focus_mode` naturally never fires in that case, and
-the two Space behaviors don't collide. (Escape is `MainWindow`'s fallback
+actual `KeyPress` event to this controller. Both default to Space; while
+a video is showing, the play/pause button's own shortcut is what's
+visible/enabled, and Qt's shortcut map consumes the key before a
+`KeyPress` is ever delivered at all -- so `on_toggle_focus_mode` naturally
+never fires in that case, and the two Space behaviors don't collide.
+(That is also why `ShortcutScope` exists: the two live in different input
+contexts, so Settings doesn't report the app's own default as a conflict.
+The dismiss shortcut -- Escape by default -- is `MainWindow`'s fallback
 out of focus mode for exactly the case this creates: entering focus mode
 while viewing an image, then navigating to a video, leaves Space bound to
 play/pause with no way back via this controller alone.)
 
-Digit keys (0-9) toggle whichever tag the item-tags panel currently has
-numbered on that digit -- see `TagListModel`/`TagRowDelegate` for the
-numbering itself, and `MainWindow` for which side of the checked/unchecked
-split is currently numbered. Only the non-text-editing case is handled
-here, though: while a text box has focus, `MainWindow.eventFilter`
-intercepts digits itself, ahead of ever calling in here, since Ctrl+digit
-needs to insert a literal character into that specific focused widget --
-something this controller has no widget access to do, being a plain
-callback dispatcher. (Emphasis on *insert*: letting a Ctrl+digit
-`QKeyEvent` fall through to the widget unhandled does not, in practice,
-type anything -- Windows hands Qt an empty `text()` for most Ctrl+digit
-combinations, confirmed empirically here, so passthrough alone would
-silently make digits untypable in these fields even with Ctrl held.)
-Ctrl on its own (tapped alone, nothing else pressed while it's down) is a
-third, unrelated gesture, also handled entirely in `MainWindow`, that
-toggles which side of the checked/unchecked split gets numbered at all;
-this controller has no notion of that toggle, only of resolving whatever
-digit was pressed against whichever side is currently active.
+Quick-select shortcuts (digits 0-9 by default) toggle whichever tag the
+item-tags panel currently has numbered in that slot -- see
+`TagListModel`/`TagRowDelegate` for the numbering itself, and
+`MainWindow` for which side of the checked/unchecked split is currently
+numbered. Only the non-text-editing case is handled here, though: while a
+text box has focus, `MainWindow.eventFilter` intercepts them itself, ahead
+of ever calling in here, since Ctrl+<that key> needs to insert a literal
+character into that specific focused widget -- something this controller
+has no widget access to do, being a plain callback dispatcher. (Emphasis
+on *insert*: letting a Ctrl+digit `QKeyEvent` fall through to the widget
+unhandled does not, in practice, type anything -- Windows hands Qt an
+empty `text()` for most Ctrl+digit combinations, confirmed empirically
+here, so passthrough alone would silently make those keys untypable in
+these fields even with Ctrl held.)
+
+The numbering-swap gesture (Ctrl tapped alone, nothing else pressed while
+it's down) is a third, unrelated kind of shortcut, also handled entirely
+in `MainWindow` -- it has no `QKeySequence` representation at all, so it
+can't be resolved from a single key event. This controller has no notion
+of that toggle, only of resolving whatever quick-select key was pressed
+against whichever side is currently active.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, Qt
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtCore import QKeyCombination, QObject, Qt
+from PySide6.QtGui import QKeyEvent, QKeySequence
 
+from prismic.application.input import shortcuts
 from prismic.application.input.resolver import InputContext, InputEvent, InputResolver
+from prismic.application.input.shortcuts import ShortcutBindings
 
-DIGIT_KEYS: dict[int, int] = {
-    Qt.Key.Key_0: 0,
-    Qt.Key.Key_1: 1,
-    Qt.Key.Key_2: 2,
-    Qt.Key.Key_3: 3,
-    Qt.Key.Key_4: 4,
-    Qt.Key.Key_5: 5,
-    Qt.Key.Key_6: 6,
-    Qt.Key.Key_7: 7,
-    Qt.Key.Key_8: 8,
-    Qt.Key.Key_9: 9,
+_BARE_MODIFIER_KEYS: frozenset[int] = frozenset(
+    {
+        Qt.Key.Key_Control.value,
+        Qt.Key.Key_Shift.value,
+        Qt.Key.Key_Alt.value,
+        Qt.Key.Key_Meta.value,
+        Qt.Key.Key_AltGr.value,
+    }
+)
+
+# Everything a key sequence can actually express. Keypad and
+# group-switch are masked off deliberately: a numpad "1" should be the
+# same shortcut as the row-of-digits "1", not an unbindable variant of
+# it, and neither modifier survives a QKeySequence round trip anyway.
+_SEQUENCE_MODIFIERS = (
+    Qt.KeyboardModifier.ControlModifier
+    | Qt.KeyboardModifier.ShiftModifier
+    | Qt.KeyboardModifier.AltModifier
+    | Qt.KeyboardModifier.MetaModifier
+)
+
+TAP_MODIFIER_KEYS: dict[str, Qt.Key] = {
+    "Ctrl": Qt.Key.Key_Control,
+    "Alt": Qt.Key.Key_Alt,
+    "Shift": Qt.Key.Key_Shift,
+    "Meta": Qt.Key.Key_Meta,
 }
+"""The Qt key each `ShortcutKind.TAP_MODIFIER` binding names -- what
+`MainWindow.eventFilter` watches for a press/release pair on."""
+
+
+def key_text(event: QKeyEvent) -> str | None:
+    """`event` as a portable key-sequence string, or None if it isn't one.
+
+    Returns None for a bare modifier press (Ctrl on its own has no
+    sequence representation -- the tap gesture that *does* use it is
+    recognized from the press/release pair in `MainWindow.eventFilter`,
+    not from a single event).
+    """
+    if event.key() in _BARE_MODIFIER_KEYS:
+        return None
+    combination = QKeyCombination(event.modifiers() & _SEQUENCE_MODIFIERS, Qt.Key(event.key()))
+    text = QKeySequence(combination).toString(QKeySequence.SequenceFormat.PortableText)
+    return text or None
+
+
+def strip_control(binding: str) -> str | None:
+    """`binding` without a leading "Ctrl+", or None if it had none.
+
+    Used for the "Ctrl+<quick-select key> types the character instead of
+    toggling a tag" escape hatch -- see `MainWindow.eventFilter`.
+    """
+    prefix = "Ctrl+"
+    return binding[len(prefix) :] if binding.startswith(prefix) else None
+
+
+def literal_character(binding: str) -> str | None:
+    """The character `binding` would type if it weren't a shortcut, or
+    None if it wouldn't type anything.
+
+    Only single-character bindings qualify: "1" types "1" and "Q" types
+    "q", but "F1" or "Left" type nothing at all, so there's nothing to
+    hand back to a focused text box for those.
+    """
+    if len(binding) != 1:
+        return None
+    return binding.lower() if binding.isalpha() else binding
 
 
 class KeyboardController(QObject):
@@ -80,6 +152,7 @@ class KeyboardController(QObject):
 
     def __init__(
         self,
+        bindings: ShortcutBindings,
         *,
         on_navigate_previous: Callable[[], None],
         on_navigate_next: Callable[[], None],
@@ -90,12 +163,23 @@ class KeyboardController(QObject):
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self._on_navigate_previous = on_navigate_previous
-        self._on_navigate_next = on_navigate_next
-        self._on_undo = on_undo
+        self._bindings = bindings
         self._on_focus_item_tags = on_focus_item_tags
         self._on_toggle_tag_shortcut = on_toggle_tag_shortcut
-        self._on_toggle_focus_mode = on_toggle_focus_mode
+        self._commands: dict[str, Callable[[], None]] = {
+            shortcuts.NAVIGATE_PREVIOUS: on_navigate_previous,
+            shortcuts.NAVIGATE_NEXT: on_navigate_next,
+            shortcuts.NAVIGATE_PREVIOUS_WHILE_TYPING: on_navigate_previous,
+            shortcuts.NAVIGATE_NEXT_WHILE_TYPING: on_navigate_next,
+            shortcuts.FOCUS_TAG_SEARCH: on_focus_item_tags,
+            shortcuts.FOCUS_MODE: on_toggle_focus_mode,
+        }
+        # Undo is the one global command with no entry in `SHORTCUTS`:
+        # Ctrl+Z is a platform-level editing convention rather than an
+        # app-specific binding, and Qt's own text widgets implement it
+        # themselves with no way to rebind theirs to match. Offering to
+        # rebind only half of it would be worse than not offering at all.
+        self._on_undo = on_undo
 
         self._resolver = InputResolver()
         self._resolver.register(InputContext.GLOBAL_COMMAND, self._handle_global_key)
@@ -106,67 +190,35 @@ class KeyboardController(QObject):
 
         `text_editing` is whether a text-entry widget currently has focus
         (a tag search/create box, an inline rename editor, ...). While
-        true, everything except Up/Down is left alone entirely so normal
-        typing works -- `MainWindow.eventFilter` handles digits itself in
-        that case, ahead of ever calling in here (see this module's
-        docstring for why)."""
+        true, only the two "works while typing" navigation shortcuts are
+        honored, so normal typing works -- `MainWindow.eventFilter`
+        handles quick-select keys itself in that case, ahead of ever
+        calling in here (see this module's docstring for why)."""
+        pressed = key_text(event)
+        if pressed is None:
+            return False
         if text_editing:
-            key_text = _key_text(event)
-            if key_text == "Up":
-                self._on_navigate_previous()
-                return True
-            if key_text == "Down":
-                self._on_navigate_next()
-                return True
+            for shortcut_id in (
+                shortcuts.NAVIGATE_PREVIOUS_WHILE_TYPING,
+                shortcuts.NAVIGATE_NEXT_WHILE_TYPING,
+            ):
+                if self._bindings.binding(shortcut_id) == pressed:
+                    self._commands[shortcut_id]()
+                    return True
             return False
-        digit = DIGIT_KEYS.get(event.key())
-        if digit is not None:
-            self._on_toggle_tag_shortcut(digit)
+        slot = self._bindings.quick_select_slot(pressed)
+        if slot is not None:
+            self._on_toggle_tag_shortcut(slot)
             return True
-        key_text = _key_text(event)
-        if key_text is None:
-            return False
-        return self._resolver.dispatch(InputEvent(key=key_text))
-
-    def _handle_global_key(self, event: InputEvent) -> bool:
-        if event.key in ("Left", "Up"):
-            self._on_navigate_previous()
-            return True
-        if event.key in ("Right", "Down"):
-            self._on_navigate_next()
-            return True
-        if event.key == "Ctrl+Z":
+        if pressed == "Ctrl+Z":
             self._on_undo()
             return True
-        if event.key == "Tab":
-            self._on_focus_item_tags()
-            return True
-        if event.key == "Space":
-            self._on_toggle_focus_mode()
-            return True
-        return False
+        return self._resolver.dispatch(InputEvent(key=pressed))
 
-
-def _key_text(event: QKeyEvent) -> str | None:
-    key = event.key()
-    modifiers = event.modifiers()
-    if key == Qt.Key.Key_Left:
-        return "Left"
-    if key == Qt.Key.Key_Right:
-        return "Right"
-    if key == Qt.Key.Key_Up:
-        return "Up"
-    if key == Qt.Key.Key_Down:
-        return "Down"
-    if key == Qt.Key.Key_Tab:
-        return "Tab"
-    if key == Qt.Key.Key_Space:
-        return "Space"
-    if key == Qt.Key.Key_Escape:
-        return "Escape"
-    if key == Qt.Key.Key_Z and modifiers & Qt.KeyboardModifier.ControlModifier:
-        return "Ctrl+Z"
-    text = event.text()
-    if text and text.isprintable():
-        return text
-    return None
+    def _handle_global_key(self, event: InputEvent) -> bool:
+        shortcut_id = self._bindings.shortcut_for(event.key)
+        command = self._commands.get(shortcut_id) if shortcut_id is not None else None
+        if command is None:
+            return False
+        command()
+        return True

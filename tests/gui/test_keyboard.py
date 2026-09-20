@@ -2,8 +2,11 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import QApplication, QDialog
 from pytestqt.qtbot import QtBot
 
+from prismic.application.input import shortcuts
 from prismic.ui.main_window import MainWindow
 
 
@@ -266,7 +269,7 @@ def test_digit_toggles_the_unselected_tag_numbered_with_it(
     window._on_tag_create("a")
     window._on_tag_create("b")
     assert window._tag_shortcut_mode_action.isChecked() is False  # unselected by default
-    tag_id = window.item_tag_panel.model.tag_id_for_shortcut(1, selected=False)
+    tag_id = window.item_tag_panel.model.tag_id_for_slot(0, selected=False)
     assert tag_id is not None
 
     window.result_list.setFocus()
@@ -284,7 +287,7 @@ def test_digit_toggles_a_tag_even_while_a_search_box_is_focused(
     current_id = session.state.result_set[0]
     session.state.current_item = current_id
     window._on_tag_create("a")
-    tag_id = window.item_tag_panel.model.tag_id_for_shortcut(1, selected=False)
+    tag_id = window.item_tag_panel.model.tag_id_for_slot(0, selected=False)
     assert tag_id is not None
 
     window.item_tag_panel.search_box.setFocus()
@@ -378,7 +381,7 @@ def test_selected_tag_mode_numbers_and_toggles_checked_tags_instead(
     window._toggle_tag_shortcut_mode()
     assert window._tag_shortcut_mode_action.isChecked() is True
 
-    tag_id = window.item_tag_panel.model.tag_id_for_shortcut(1, selected=True)
+    tag_id = window.item_tag_panel.model.tag_id_for_slot(0, selected=True)
     assert tag_id == tag_a.id
 
     window.result_list.setFocus()
@@ -386,3 +389,262 @@ def test_selected_tag_mode_numbers_and_toggles_checked_tags_instead(
     qtbot.keyClick(window.result_list, Qt.Key.Key_1)
 
     assert session.mappings.tags_for_media(current_id) == []  # toggled back off
+
+
+# -- Configurable bindings ---------------------------------------------------
+# Every key above is a *default*, not a constant. These check that
+# rebinding one in Settings actually moves the behavior with it, rather
+# than the new key being recorded and then ignored.
+
+
+def rebind(window: MainWindow, shortcut_id: str, binding: str) -> None:
+    """Do what the Settings dialog does: change a binding, then tell the
+    window to re-apply. `MainWindow.open_settings` wires exactly this pair
+    together via the dialog's `bindings_changed` signal."""
+    window.bindings.set_binding(shortcut_id, binding)
+    window._apply_bindings()
+
+
+def test_rebinding_navigation_moves_it_to_the_new_key(qtbot: QtBot, window: MainWindow) -> None:
+    session = window.session
+    assert session is not None
+    first_id, second_id = session.state.result_set
+    session.state.current_item = first_id
+    window._sync_result_selection()
+    rebind(window, shortcuts.NAVIGATE_NEXT, "F5")
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_F5)
+
+    assert session.state.current_item == second_id
+
+    # ...and off the old one, rather than answering to both.
+    session.state.current_item = first_id
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Right)
+
+    assert session.state.current_item == first_id
+
+
+def test_an_unbound_shortcut_stops_responding(qtbot: QtBot, window: MainWindow) -> None:
+    rebind(window, shortcuts.FOCUS_MODE, "")
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Space)
+
+    assert window._focus_mode_action.isChecked() is False
+
+
+def test_escape_still_leaves_focus_mode_when_dismiss_is_unbound(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    """A deliberate safety hatch: focus mode hides the menu bar, so a user
+    who clears both Dismiss and Focus Mode would otherwise be stuck in it
+    with no way back short of quitting."""
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Space)
+    assert window._focus_mode_action.isChecked() is True
+    rebind(window, shortcuts.DISMISS, "")
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Escape)
+
+    assert window._focus_mode_action.isChecked() is False
+
+
+def test_rebinding_dismiss_moves_it_off_escape(qtbot: QtBot, window: MainWindow) -> None:
+    rebind(window, shortcuts.DISMISS, "F4")
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.item_tag_panel.search_box, Qt.Key.Key_F4)
+
+    assert window.result_list.hasFocus()
+
+
+def test_rebinding_the_tag_search_cycle_moves_the_whole_cycle(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    rebind(window, shortcuts.FOCUS_TAG_SEARCH, "F2")
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_F2)
+    assert window.item_tag_panel.search_box.hasFocus()
+
+    qtbot.keyClick(window.item_tag_panel.search_box, Qt.Key.Key_F2)
+    assert window.filter_panel.search_box.hasFocus()
+
+    qtbot.keyClick(window.filter_panel.search_box, Qt.Key.Key_F2)
+    assert window.result_list.hasFocus()
+
+
+def test_rebinding_a_menu_shortcut_updates_the_action(window: MainWindow) -> None:
+    rebind(window, shortcuts.RESCAN, "F5")
+
+    assert window._shortcut_actions[shortcuts.RESCAN].shortcut() == QKeySequence("F5")
+
+
+def test_unbinding_a_menu_shortcut_leaves_the_action_with_no_key(window: MainWindow) -> None:
+    rebind(window, shortcuts.RESCAN, "")
+
+    assert window._shortcut_actions[shortcuts.RESCAN].shortcut().isEmpty()
+
+
+def test_the_focus_mode_menu_entry_shows_its_current_key(window: MainWindow) -> None:
+    """It has no QShortcut of its own -- one would go ambiguous against
+    the viewer's play/pause button -- so its key is menu text instead,
+    which still has to follow a rebind rather than keep advertising
+    Space."""
+    rebind(window, shortcuts.FOCUS_MODE, "F9")
+
+    assert window._focus_mode_action.text() == "Focus Mode\tF9"
+
+    rebind(window, shortcuts.FOCUS_MODE, "")
+
+    assert window._focus_mode_action.text() == "Focus Mode"
+
+
+def test_rebinding_play_pause_moves_the_viewer_button_shortcut(window: MainWindow) -> None:
+    rebind(window, shortcuts.VIEWER_PLAY_PAUSE, "F10")
+
+    assert window.viewer.play_pause_button.shortcut() == QKeySequence("F10")
+
+
+def test_rebinding_a_quick_select_key_toggles_the_same_tag(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    current_id = session.state.result_set[0]
+    session.state.current_item = current_id
+    window._on_tag_create("a")
+    tag_id = window.item_tag_panel.model.tag_id_for_slot(0, selected=False)
+    assert tag_id is not None
+    rebind(window, shortcuts.quick_select_id(0), "Q")
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Q)
+
+    assert [t.id for t in session.mappings.tags_for_media(current_id)] == [tag_id]
+
+    # ...and the digit it used to be on is genuinely free again, not
+    # still quietly wired up alongside the new key.
+    qtbot.keyClick(window.result_list, Qt.Key.Key_1)
+
+    assert [t.id for t in session.mappings.tags_for_media(current_id)] == [tag_id]
+
+
+def test_a_rebound_quick_select_key_is_still_typeable_with_ctrl(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    """The escape hatch generalizes past digits: whatever key a
+    quick-select shortcut is spent on, Ctrl+it types that character."""
+    session = window.session
+    assert session is not None
+    session.state.current_item = session.state.result_set[0]
+    window._on_tag_create("a")
+    rebind(window, shortcuts.quick_select_id(0), "Q")
+
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+    qtbot.keyClick(
+        window.item_tag_panel.search_box, Qt.Key.Key_Q, Qt.KeyboardModifier.ControlModifier
+    )
+
+    assert window.item_tag_panel.search_box.text() == "q"
+    assert session.mappings.tags_for_media(session.state.current_item) == []
+
+
+def test_the_tag_rows_label_whichever_key_is_bound(window: MainWindow) -> None:
+    window._on_tag_create("a")
+    assert window._quick_select_labels()[0] == "1"
+
+    rebind(window, shortcuts.quick_select_id(0), "Ctrl+Q")
+
+    # The last key of the combination -- the checkbox has no room for the
+    # whole thing, and "Q" is the part that identifies it.
+    assert window._quick_select_labels()[0] == "Q"
+
+    rebind(window, shortcuts.quick_select_id(0), "")
+
+    assert 0 not in window._quick_select_labels()
+
+
+def test_rebinding_the_numbering_swap_moves_it_to_another_modifier(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    rebind(window, shortcuts.SWAP_TAG_NUMBERING, "Alt")
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+
+    qtbot.keyPress(window.result_list, Qt.Key.Key_Alt)
+    qtbot.keyRelease(window.result_list, Qt.Key.Key_Alt)
+
+    assert window._tag_shortcut_mode_action.isChecked() is True
+
+    # Ctrl is an ordinary modifier again, with no gesture attached.
+    qtbot.keyPress(window.result_list, Qt.Key.Key_Control)
+    qtbot.keyRelease(window.result_list, Qt.Key.Key_Control)
+
+    assert window._tag_shortcut_mode_action.isChecked() is True
+
+
+def test_unbinding_the_numbering_swap_disables_the_gesture(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    rebind(window, shortcuts.SWAP_TAG_NUMBERING, "")
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+
+    qtbot.keyPress(window.result_list, Qt.Key.Key_Control)
+    qtbot.keyRelease(window.result_list, Qt.Key.Key_Control)
+
+    assert window._tag_shortcut_mode_action.isChecked() is False
+
+
+def test_shortcuts_stand_down_while_a_modal_dialog_is_open(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    """Otherwise a keystroke meant for the Settings window's capture box
+    would also fire whatever command it's currently bound to."""
+    session = window.session
+    assert session is not None
+    first_id = session.state.result_set[0]
+    session.state.current_item = first_id
+    window._sync_result_selection()
+
+    blocker = QDialog(window)
+    blocker.setWindowModality(Qt.WindowModality.ApplicationModal)
+    qtbot.addWidget(blocker)
+    blocker.show()
+    qtbot.waitExposed(blocker)
+    qtbot.waitUntil(lambda: QApplication.activeModalWidget() is blocker, timeout=1000)
+
+    qtbot.keyClick(blocker, Qt.Key.Key_Right)
+
+    assert session.state.current_item == first_id
+
+    blocker.close()
+    qtbot.waitUntil(lambda: QApplication.activeModalWidget() is None, timeout=1000)
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Right)
+
+    assert session.state.current_item != first_id  # working again afterwards
+
+
+def test_bindings_persist_across_windows(qtbot: QtBot) -> None:
+    """A rebind is a preference, not session state -- it has to survive
+    the app being closed and reopened."""
+    first = MainWindow()
+    qtbot.addWidget(first)
+    first.bindings.set_binding(shortcuts.RESCAN, "F5")
+
+    second = MainWindow()
+    qtbot.addWidget(second)
+
+    assert second.bindings.binding(shortcuts.RESCAN) == "F5"
+    assert second._shortcut_actions[shortcuts.RESCAN].shortcut() == QKeySequence("F5")

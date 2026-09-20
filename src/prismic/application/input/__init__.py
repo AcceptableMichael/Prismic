@@ -5,11 +5,23 @@ from prismic.application.input.resolver import (
     InputEvent,
     InputResolver,
 )
+from prismic.application.input.shortcuts import (
+    SHORTCUTS,
+    ShortcutBindings,
+    ShortcutDefinition,
+    ShortcutKind,
+    ShortcutScope,
+)
 
 __all__ = [
     "INPUT_CONTEXT_PRECEDENCE",
+    "SHORTCUTS",
     "ChordState",
     "InputContext",
     "InputEvent",
     "InputResolver",
+    "ShortcutBindings",
+    "ShortcutDefinition",
+    "ShortcutKind",
+    "ShortcutScope",
 ]

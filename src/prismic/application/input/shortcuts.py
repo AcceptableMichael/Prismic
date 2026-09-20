@@ -1,0 +1,395 @@
+"""The one place that knows what every keyboard shortcut in the app *is*.
+
+Every shortcut the user can press is declared once, here, as a
+`ShortcutDefinition` in `SHORTCUTS`. Nothing else in the codebase is
+allowed to hard-code a key: `ui/keyboard.py` dispatches by looking a
+pressed key up in `ShortcutBindings`, `ui/main_window.py` pushes the
+resolved bindings onto the menu actions and hover hints, and
+`ui/settings_dialog.py` renders this list verbatim. That's what makes
+"list every single shortcut and let the user configure each one"
+mechanically true rather than a hand-maintained duplicate that drifts:
+a shortcut that isn't in this file doesn't work, and one that is shows
+up in Settings automatically.
+
+Deliberately Qt-free. Bindings are plain strings in Qt's *portable* key-
+sequence format ("Ctrl+Shift+O", "Space", "Left", "1", "Esc") because
+that format round-trips exactly through `QKeySequence` in both
+directions, but this module never imports Qt -- translating a real
+`QKeyEvent` into one of these strings is `ui/keyboard.key_text()`'s job,
+which keeps the registry unit-testable without a `QApplication` and keeps
+the layer direction (`ui -> application`) intact.
+
+An empty binding string means *unbound*, which is a legitimate
+configuration: the user can clear a shortcut they don't want rather than
+being forced to park it on some key.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from dataclasses import dataclass
+from enum import Enum, auto
+from typing import Any
+
+from prismic.persistence.preferences import PreferencesStore
+
+_PREFERENCES_KEY = "shortcuts"
+
+QUICK_SELECT_SLOT_COUNT = 10
+"""How many tag rows the item-tags panel numbers at a time -- see
+`ui/tag_model.py`, which assigns slots 0..N-1 by position."""
+
+
+class ShortcutKind(Enum):
+    KEY = auto()
+    """An ordinary key press, with or without modifiers."""
+
+    TAP_MODIFIER = auto()
+    """A bare modifier pressed and released with nothing else in between.
+
+    Not expressible as a key sequence at all (there is no `QKeySequence`
+    for "Ctrl, alone, on release"), so its binding is just the modifier's
+    own name -- see `TAP_MODIFIER_CHOICES`. The gesture is recognized in
+    `MainWindow.eventFilter`, which is the only place that sees the
+    press/release pair it needs.
+    """
+
+
+TAP_MODIFIER_CHOICES: tuple[str, ...] = ("Ctrl", "Alt", "Shift", "Meta")
+
+
+class ShortcutScope(Enum):
+    """Which input context a shortcut is resolved in, per the overview's
+    section 10 precedence chain.
+
+    Only used for conflict detection: two shortcuts in *different* scopes
+    may share a key without it being a mistake. That isn't a theoretical
+    allowance -- Space is bound to both Focus Mode (global) and the
+    viewer's play/pause button (viewer) by default, on purpose, and Qt
+    resolves it to whichever is live (see `ui/keyboard.py`'s module
+    docstring). Flagging the app's own shipped defaults as a conflict
+    would make the warning worthless.
+    """
+
+    GLOBAL = auto()
+    VIEWER = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class ShortcutDefinition:
+    id: str
+    category: str
+    label: str
+    description: str
+    default: str
+    kind: ShortcutKind = ShortcutKind.KEY
+    scope: ShortcutScope = ShortcutScope.GLOBAL
+
+
+# -- Shortcut ids -----------------------------------------------------------
+# Named constants rather than bare strings at the call sites, so a typo is
+# an AttributeError at import time instead of a shortcut that silently
+# never fires.
+
+OPEN_COLLECTION_FOLDER = "collection.open_folder"
+OPEN_COLLECTION_FILE = "collection.open_file"
+RESCAN = "collection.rescan"
+OPEN_SETTINGS = "collection.settings"
+
+TOGGLE_THUMBNAILS = "view.toggle_thumbnails"
+FOCUS_MODE = "view.focus_mode"
+SWAP_TAG_NUMBERING = "view.swap_tag_numbering"
+
+NAVIGATE_PREVIOUS = "navigate.previous"
+NAVIGATE_NEXT = "navigate.next"
+NAVIGATE_PREVIOUS_WHILE_TYPING = "navigate.previous_while_typing"
+NAVIGATE_NEXT_WHILE_TYPING = "navigate.next_while_typing"
+
+FOCUS_TAG_SEARCH = "tagging.focus_search"
+DISMISS = "tagging.dismiss"
+
+
+def quick_select_id(slot: int) -> str:
+    """The shortcut id for quick-select slot `slot` (0-based)."""
+    return f"tagging.quick_select_{slot + 1}"
+
+
+VIEWER_PLAY_PAUSE = "viewer.play_pause"
+
+
+_QUICK_SELECT_DEFAULTS: tuple[str, ...] = ("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
+
+
+def _quick_select_definitions() -> Iterator[ShortcutDefinition]:
+    for slot in range(QUICK_SELECT_SLOT_COUNT):
+        yield ShortcutDefinition(
+            id=quick_select_id(slot),
+            category="Tagging",
+            label=f"Toggle numbered tag {slot + 1}",
+            description=(
+                f"Toggle whichever tag the Edit list currently numbers {slot + 1} "
+                "on the file being viewed"
+            ),
+            default=_QUICK_SELECT_DEFAULTS[slot],
+        )
+
+
+SHORTCUTS: tuple[ShortcutDefinition, ...] = (
+    ShortcutDefinition(
+        id=OPEN_COLLECTION_FOLDER,
+        category="Collection",
+        label="Open collection folder",
+        description="Open a folder as a collection",
+        default="Ctrl+O",
+    ),
+    ShortcutDefinition(
+        id=OPEN_COLLECTION_FILE,
+        category="Collection",
+        label="Open .prismic file",
+        description="Open an existing .prismic collection file",
+        default="Ctrl+Shift+O",
+    ),
+    ShortcutDefinition(
+        id=RESCAN,
+        category="Collection",
+        label="Rescan",
+        description="Rescan the collection folder for changes",
+        default="Ctrl+R",
+    ),
+    ShortcutDefinition(
+        id=OPEN_SETTINGS,
+        category="Collection",
+        label="Settings",
+        description="Open this settings window",
+        default="Ctrl+,",
+    ),
+    ShortcutDefinition(
+        id=TOGGLE_THUMBNAILS,
+        category="View",
+        label="Show thumbnails",
+        description="Toggle thumbnail previews in the results list",
+        default="Ctrl+T",
+    ),
+    ShortcutDefinition(
+        id=FOCUS_MODE,
+        category="View",
+        label="Focus mode",
+        description="Hide every panel except the media viewer",
+        default="Space",
+    ),
+    ShortcutDefinition(
+        id=SWAP_TAG_NUMBERING,
+        category="View",
+        label="Swap which tags are numbered",
+        description="Tapped alone, switches the Edit list's numbering between unselected "
+        "and selected tags",
+        default="Ctrl",
+        kind=ShortcutKind.TAP_MODIFIER,
+    ),
+    ShortcutDefinition(
+        id=NAVIGATE_PREVIOUS,
+        category="Navigation",
+        label="Previous file",
+        description="Move to the previous file in the results list",
+        default="Left",
+    ),
+    ShortcutDefinition(
+        id=NAVIGATE_NEXT,
+        category="Navigation",
+        label="Next file",
+        description="Move to the next file in the results list",
+        default="Right",
+    ),
+    ShortcutDefinition(
+        id=NAVIGATE_PREVIOUS_WHILE_TYPING,
+        category="Navigation",
+        label="Previous file (works while typing)",
+        description="Move to the previous file even while a tag search box has focus",
+        default="Up",
+    ),
+    ShortcutDefinition(
+        id=NAVIGATE_NEXT_WHILE_TYPING,
+        category="Navigation",
+        label="Next file (works while typing)",
+        description="Move to the next file even while a tag search box has focus",
+        default="Down",
+    ),
+    ShortcutDefinition(
+        id=FOCUS_TAG_SEARCH,
+        category="Tagging",
+        label="Cycle tag search boxes",
+        description="Jump to the Edit search box, then the Filter one, then back to browsing",
+        default="Tab",
+    ),
+    ShortcutDefinition(
+        id=DISMISS,
+        category="Tagging",
+        label="Dismiss",
+        description="Leave the tag search box, and exit focus mode",
+        default="Esc",
+    ),
+    *_quick_select_definitions(),
+    ShortcutDefinition(
+        id=VIEWER_PLAY_PAUSE,
+        category="Viewer",
+        label="Play or pause",
+        description="Play or pause the video currently being viewed",
+        default="Space",
+        scope=ShortcutScope.VIEWER,
+    ),
+)
+
+_BY_ID: dict[str, ShortcutDefinition] = {definition.id: definition for definition in SHORTCUTS}
+
+CATEGORY_ORDER: tuple[str, ...] = tuple(
+    dict.fromkeys(definition.category for definition in SHORTCUTS)
+)
+"""Every category, in the order it first appears in `SHORTCUTS` -- which
+is also the order Settings renders them in, so reordering the list above
+reorders the UI with no second list to keep in sync."""
+
+
+def definition(shortcut_id: str) -> ShortcutDefinition:
+    return _BY_ID[shortcut_id]
+
+
+def normalize(binding: str) -> str:
+    return binding.strip()
+
+
+def keycaps(binding: str) -> tuple[str, ...]:
+    """Split a binding into one label per physical key, for rendering as
+    keycap boxes (`HoverExplainerBar`, the Settings rows).
+
+    Peels known modifier prefixes off the front rather than splitting on
+    "+", because "+" is also a bindable key: a plain `split("+")` turns
+    "Ctrl++" into three segments (two of them empty) instead of the two
+    keys it actually is.
+    """
+    binding = normalize(binding)
+    if not binding:
+        return ()
+    parts: list[str] = []
+    remaining = binding
+    while True:
+        for modifier in TAP_MODIFIER_CHOICES:
+            if remaining.startswith(f"{modifier}+"):
+                parts.append(modifier)
+                remaining = remaining[len(modifier) + 1 :]
+                break
+        else:
+            break
+    if remaining:
+        parts.append(remaining)
+    return tuple(parts)
+
+
+class ShortcutBindings:
+    """The currently-configured binding for every shortcut, persisted to
+    the app-wide preferences file.
+
+    Only *overrides* are stored, not the full table: a shortcut the user
+    never touched follows its `default` forever, so changing a default in
+    `SHORTCUTS` reaches everyone who hadn't already customized that one.
+    """
+
+    def __init__(self, store: PreferencesStore | None = None) -> None:
+        self._store = store if store is not None else PreferencesStore()
+        self._overrides: dict[str, str] = {}
+        self._load()
+
+    # -- Reading ------------------------------------------------------------
+
+    @property
+    def definitions(self) -> tuple[ShortcutDefinition, ...]:
+        return SHORTCUTS
+
+    def binding(self, shortcut_id: str) -> str:
+        """The key currently bound to `shortcut_id`, or "" if unbound."""
+        override = self._overrides.get(shortcut_id)
+        if override is not None:
+            return override
+        return _BY_ID[shortcut_id].default
+
+    def is_default(self, shortcut_id: str) -> bool:
+        return shortcut_id not in self._overrides
+
+    def shortcut_for(self, binding: str, scope: ShortcutScope = ShortcutScope.GLOBAL) -> str | None:
+        """The id of the shortcut `binding` currently triggers in `scope`,
+        or None if nothing is bound to it.
+
+        An unbound shortcut (binding "") never matches, so a cleared
+        shortcut can't be fired by some unrelated key normalizing to the
+        empty string."""
+        binding = normalize(binding)
+        if not binding:
+            return None
+        for definition_ in SHORTCUTS:
+            if definition_.scope is scope and self.binding(definition_.id) == binding:
+                return definition_.id
+        return None
+
+    def quick_select_slot(self, binding: str) -> int | None:
+        """The quick-select slot `binding` toggles, or None."""
+        binding = normalize(binding)
+        if not binding:
+            return None
+        for slot in range(QUICK_SELECT_SLOT_COUNT):
+            if self.binding(quick_select_id(slot)) == binding:
+                return slot
+        return None
+
+    def conflicts(self, shortcut_id: str, binding: str) -> tuple[str, ...]:
+        """Other shortcuts in the same scope already using `binding`."""
+        binding = normalize(binding)
+        if not binding:
+            return ()
+        scope = _BY_ID[shortcut_id].scope
+        return tuple(
+            other.id
+            for other in SHORTCUTS
+            if other.id != shortcut_id
+            and other.scope is scope
+            and self.binding(other.id) == binding
+        )
+
+    # -- Writing ------------------------------------------------------------
+
+    def set_binding(self, shortcut_id: str, binding: str) -> None:
+        binding = normalize(binding)
+        if binding == _BY_ID[shortcut_id].default:
+            self._overrides.pop(shortcut_id, None)
+        else:
+            self._overrides[shortcut_id] = binding
+        self._save()
+
+    def reset(self, shortcut_id: str) -> None:
+        if self._overrides.pop(shortcut_id, None) is not None:
+            self._save()
+
+    def reset_all(self) -> None:
+        if self._overrides:
+            self._overrides.clear()
+            self._save()
+
+    # -- Persistence ---------------------------------------------------------
+
+    def _load(self) -> None:
+        stored: Any = self._store.load().get(_PREFERENCES_KEY)
+        if not isinstance(stored, dict):
+            return
+        for shortcut_id, binding in stored.items():
+            # Anything unrecognized is dropped rather than carried along:
+            # this file is hand-editable, and a stale id from an older
+            # build (or a typo) shouldn't survive the next save to keep
+            # confusing whoever reads it.
+            if shortcut_id in _BY_ID and isinstance(binding, str):
+                self._overrides[shortcut_id] = normalize(binding)
+
+    def _save(self) -> None:
+        data = self._store.load()
+        if self._overrides:
+            data[_PREFERENCES_KEY] = dict(self._overrides)
+        else:
+            data.pop(_PREFERENCES_KEY, None)
+        self._store.save(data)

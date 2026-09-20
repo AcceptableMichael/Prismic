@@ -72,6 +72,9 @@ class MediaViewer(QWidget):
 
         self._play_pause_button = QPushButton("Play")
         self._play_pause_button.setObjectName("playPauseButton")
+        # Space by default, but user-configurable like every other
+        # shortcut -- `MainWindow` pushes the current binding in via
+        # `set_play_pause_shortcut()` once it has one.
         self._play_pause_button.setShortcut(QKeySequence(Qt.Key.Key_Space))
         self._play_pause_button.clicked.connect(self.toggle_playback)
         self._seek_slider = QSlider(Qt.Orientation.Horizontal)
@@ -93,6 +96,16 @@ class MediaViewer(QWidget):
         layout.addWidget(self._controls)
 
         self._current_path: Path | None = None
+
+    def set_play_pause_shortcut(self, binding: str) -> None:
+        """Rebind the play/pause button's own key, in Qt's portable key-
+        sequence format. An empty string leaves it with no shortcut at
+        all, which is what an unbound shortcut means everywhere else."""
+        self._play_pause_button.setShortcut(
+            QKeySequence(binding, QKeySequence.SequenceFormat.PortableText)
+            if binding
+            else QKeySequence()
+        )
 
     def show_media(self, path: Path) -> None:
         self._current_path = path

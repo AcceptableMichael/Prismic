@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListView,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QSplitter,
     QStackedWidget,
@@ -43,6 +44,8 @@ from prismic.application.commands.tag_commands import (
     TagDeleteCommand,
     TagRenameCommand,
 )
+from prismic.application.input import shortcuts
+from prismic.application.input.shortcuts import ShortcutBindings, keycaps
 from prismic.application.queries.media_query import eligible_media
 from prismic.application.session import PrismicSession
 from prismic.domain.tag import Tag
@@ -52,9 +55,16 @@ from prismic.ui.future_watcher import FutureWatcher
 from prismic.ui.hover_explainer_bar import HoverExplainerBar
 from prismic.ui.hover_hint import HoverHintController
 from prismic.ui.instance_bridge import InstanceBridge, request_focus
-from prismic.ui.keyboard import DIGIT_KEYS, KeyboardController
+from prismic.ui.keyboard import (
+    TAP_MODIFIER_KEYS,
+    KeyboardController,
+    key_text,
+    literal_character,
+    strip_control,
+)
 from prismic.ui.result_model import MediaIdRole, ResultListModel
-from prismic.ui.tag_model import CheckedRole, CheckedShortcutRole, UncheckedShortcutRole
+from prismic.ui.settings_dialog import SettingsDialog
+from prismic.ui.tag_model import CheckedRole, CheckedSlotRole, UncheckedSlotRole
 from prismic.ui.tag_panel import TagPanel
 from prismic.ui.thumbnail_delegate import ThumbnailDelegate
 from prismic.ui.thumbnail_provider import ThumbnailProvider
@@ -65,8 +75,14 @@ _Index = QModelIndex | QPersistentModelIndex
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, initial_path: Path | None = None) -> None:
+    def __init__(
+        self, initial_path: Path | None = None, bindings: ShortcutBindings | None = None
+    ) -> None:
         super().__init__()
+        # Injectable so tests can hand in a store pointed at a temp file
+        # instead of writing to (and reading back) the real user-wide
+        # preferences file on the machine running them.
+        self._bindings = bindings if bindings is not None else ShortcutBindings()
         self.setWindowTitle("Prismic")
         self.resize(1280, 800)
         saved_geometry = QSettings().value("window/geometry")
@@ -82,11 +98,15 @@ class MainWindow(QMainWindow):
         # Sticky last arrow-key direction, so preloading can bias further
         # ahead of travel than behind -- see _preload_neighbors().
         self._nav_direction = 1
-        # True from a Key_Control press until either its own release (a
-        # "tap" -- toggles _tag_shortcut_mode_action, see eventFilter) or
-        # any other key/mouse press invalidates it (held as a modifier for
-        # something else instead).
-        self._ctrl_tap_candidate = False
+        # True from a press of whichever modifier the numbering-swap
+        # gesture is bound to, until either its own release (a "tap" --
+        # toggles _tag_shortcut_mode_action, see eventFilter) or any other
+        # key/mouse press invalidates it (held as a modifier for something
+        # else instead). `_tap_modifier_key` is that modifier's Qt key, or
+        # None when the gesture is unbound; both are set by
+        # `_apply_bindings()`.
+        self._tap_modifier_key: Qt.Key | None = None
+        self._tap_candidate = False
         # See _stable_item_tags(): the item-tag panel's checked-group
         # ordering for whichever file is current, held stable across
         # add/remove until that file changes.
@@ -98,6 +118,7 @@ class MainWindow(QMainWindow):
         self._build_menu()
 
         self.keyboard = KeyboardController(
+            self._bindings,
             on_navigate_previous=lambda: self._navigate(-1),
             on_navigate_next=lambda: self._navigate(1),
             on_undo=self._undo,
@@ -106,6 +127,7 @@ class MainWindow(QMainWindow):
             on_toggle_focus_mode=self._toggle_focus_mode,
             parent=self,
         )
+        self._apply_bindings()
         # Installed on the application, not just this window: a normal Qt
         # keyPressEvent override only fires when *this widget* has focus,
         # but Qt delivers key events to whatever child widget is focused
@@ -215,94 +237,165 @@ class MainWindow(QMainWindow):
         # TransientMessageBar's docstring).
         self.statusBar().addPermanentWidget(self._transient_bar)
 
-        self._hover_hints = HoverHintController(self._hover_bar, self)
+        self._hover_hints = HoverHintController(self._hover_bar, self._bindings, self)
         self._hover_hints.register_widget(
-            self.viewer.play_pause_button, ("Space",), "Play or pause the video"
+            self.viewer.play_pause_button, shortcuts.VIEWER_PLAY_PAUSE, "Play or pause the video"
         )
         self._hover_hints.register_widget(
-            self.item_tag_panel.header, ("Tab",), "Cycle between edit and filter"
+            self.item_tag_panel.header, shortcuts.FOCUS_TAG_SEARCH, "Cycle between edit and filter"
         )
         self._hover_hints.register_widget(
-            self.filter_panel.header, ("Tab",), "Cycle between edit and filter"
+            self.filter_panel.header, shortcuts.FOCUS_TAG_SEARCH, "Cycle between edit and filter"
         )
 
     def _build_menu(self) -> None:
+        # No key is spelled out in here: actions are registered by shortcut
+        # id, and `_apply_bindings()` is the single place that turns an id
+        # into a real key, so rebinding one in Settings updates its menu
+        # entry too. Actions passed to `_register_action_shortcut` get a
+        # real QShortcut; the two below it deliberately don't -- see their
+        # own comments for why.
+        self._shortcut_actions: dict[str, QAction] = {}
+
         file_menu = self.menuBar().addMenu("&File")
 
         open_folder_action = file_menu.addAction(
             "Open Collection Folder…", self._prompt_open_folder
         )
-        open_folder_action.setShortcut(QKeySequence("Ctrl+O"))
-        self._hover_hints.register_action(
-            open_folder_action, file_menu, ("Ctrl", "O"), "Open a folder as a collection"
+        self._register_action_shortcut(
+            open_folder_action, file_menu, shortcuts.OPEN_COLLECTION_FOLDER
         )
 
         open_file_action = file_menu.addAction("Open .prismic File…", self._prompt_open_file)
-        open_file_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
-        self._hover_hints.register_action(
-            open_file_action,
-            file_menu,
-            ("Ctrl", "Shift", "O"),
-            "Open an existing .prismic collection file",
-        )
+        self._register_action_shortcut(open_file_action, file_menu, shortcuts.OPEN_COLLECTION_FILE)
 
         file_menu.addSeparator()
 
         rescan_action = file_menu.addAction("Rescan", self._rescan)
-        rescan_action.setShortcut(QKeySequence("Ctrl+R"))
-        self._hover_hints.register_action(
-            rescan_action, file_menu, ("Ctrl", "R"), "Rescan the collection folder for changes"
-        )
+        self._register_action_shortcut(rescan_action, file_menu, shortcuts.RESCAN)
+
+        file_menu.addSeparator()
+
+        settings_action = file_menu.addAction("Settings…", self.open_settings)
+        self._register_action_shortcut(settings_action, file_menu, shortcuts.OPEN_SETTINGS)
 
         view_menu = self.menuBar().addMenu("&View")
         show_thumbnails_action = QAction("Show Thumbnails", self)
         show_thumbnails_action.setCheckable(True)
         show_thumbnails_action.setChecked(self._thumbnail_delegate.show_thumbnails)
-        show_thumbnails_action.setShortcut(QKeySequence("Ctrl+T"))
         show_thumbnails_action.toggled.connect(self._on_toggle_thumbnails)
         view_menu.addAction(show_thumbnails_action)
-        self._hover_hints.register_action(
-            show_thumbnails_action,
-            view_menu,
-            ("Ctrl", "T"),
-            "Toggle thumbnail previews in the results list",
+        self._register_action_shortcut(
+            show_thumbnails_action, view_menu, shortcuts.TOGGLE_THUMBNAILS
         )
 
-        # "Focus Mode\tSpace" rather than `setShortcut(QKeySequence(...))`:
-        # a QMenu renders the text after a literal tab right-aligned as a
-        # shortcut hint, with no QShortcut actually created -- exactly what
-        # we want here, since a real one would collide with the viewer's
-        # own Space-to-play/pause button shortcut and go ambiguous (firing
-        # neither) whenever a video happens to be showing. Space is
-        # dispatched through KeyboardController instead -- see keyboard.py's
-        # module docstring for why that sidesteps the collision.
-        self._focus_mode_action = QAction("Focus Mode\tSpace", self)
+        # Focus Mode's key goes into the action's *text*, after a literal
+        # tab, rather than through `setShortcut()`: a QMenu right-aligns
+        # that as a shortcut hint with no QShortcut actually created --
+        # exactly what we want here, since a real one would collide with
+        # the viewer's own play/pause button shortcut (both default to
+        # Space) and go ambiguous, firing neither, whenever a video
+        # happens to be showing. Focus Mode is dispatched through
+        # KeyboardController instead -- see keyboard.py's module docstring
+        # for why that sidesteps the collision. The text itself is filled
+        # in by `_apply_bindings()`, not here.
+        self._focus_mode_action = QAction(self)
         self._focus_mode_action.setCheckable(True)
         self._focus_mode_action.toggled.connect(self._apply_focus_mode)
         view_menu.addAction(self._focus_mode_action)
         self._hover_hints.register_action(
             self._focus_mode_action,
             view_menu,
-            ("Space",),
+            shortcuts.FOCUS_MODE,
             "Hide every panel except the media viewer",
         )
 
-        # No shortcut set here either, for a different reason than Focus
-        # Mode's: this one isn't a single keystroke at all. It's toggled by
-        # tapping Ctrl alone (pressed and released with no other key in
-        # between) -- see MainWindow.eventFilter -- which has no
+        # No QShortcut here either, for a different reason than Focus
+        # Mode's: this one isn't a key combination at all. It's toggled by
+        # tapping a modifier alone (pressed and released with no other key
+        # in between) -- see MainWindow.eventFilter -- which has no
         # QKeySequence representation to attach to a QAction in the first
         # place.
-        self._tag_shortcut_mode_action = QAction("Number Selected Tags Instead", self)
+        self._tag_shortcut_mode_action = QAction(self)
         self._tag_shortcut_mode_action.setCheckable(True)
         self._tag_shortcut_mode_action.toggled.connect(self._apply_tag_shortcut_mode)
         view_menu.addAction(self._tag_shortcut_mode_action)
         self._hover_hints.register_action(
             self._tag_shortcut_mode_action,
             view_menu,
-            ("Ctrl",),
-            "Tap Ctrl alone to switch which tags the Edit list numbers",
+            shortcuts.SWAP_TAG_NUMBERING,
+            "Tap it alone to switch which tags the Edit list numbers",
         )
+
+    def _register_action_shortcut(self, action: QAction, menu: QMenu, shortcut_id: str) -> None:
+        """Give `action` a real QShortcut driven by `shortcut_id`, plus the
+        hover-explainer hint that goes with it. The key itself is filled in
+        by `_apply_bindings()`; the hint text is the shortcut's own
+        description, so Settings and the status bar can't disagree about
+        what a command does."""
+        self._shortcut_actions[shortcut_id] = action
+        self._hover_hints.register_action(
+            action, menu, shortcut_id, shortcuts.definition(shortcut_id).description
+        )
+
+    # -- Shortcut bindings ----------------------------------------------------
+
+    @property
+    def bindings(self) -> ShortcutBindings:
+        return self._bindings
+
+    def open_settings(self) -> None:
+        dialog = SettingsDialog(self._bindings, self)
+        dialog.bindings_changed.connect(self._apply_bindings)
+        dialog.exec()
+
+    def _apply_bindings(self) -> None:
+        """Push the current bindings onto every part of the UI that needs a
+        real key rather than a shortcut id.
+
+        Called once at construction and again whenever Settings reports a
+        change, so a rebind takes effect immediately -- no restart, and no
+        stale key left behind in a menu entry or a hover hint."""
+        for shortcut_id, action in self._shortcut_actions.items():
+            binding = self._bindings.binding(shortcut_id)
+            action.setShortcut(
+                QKeySequence(binding, QKeySequence.SequenceFormat.PortableText)
+                if binding
+                else QKeySequence()
+            )
+        self._focus_mode_action.setText(self._menu_text("Focus Mode", shortcuts.FOCUS_MODE))
+        self._tag_shortcut_mode_action.setText(
+            self._menu_text("Number Selected Tags Instead", shortcuts.SWAP_TAG_NUMBERING)
+        )
+        self.viewer.set_play_pause_shortcut(self._bindings.binding(shortcuts.VIEWER_PLAY_PAUSE))
+        self.item_tag_panel.set_shortcut_labels(self._quick_select_labels())
+        self._tap_modifier_key = TAP_MODIFIER_KEYS.get(
+            self._bindings.binding(shortcuts.SWAP_TAG_NUMBERING)
+        )
+        # Whatever half-finished tap gesture was in flight was measured
+        # against the old modifier -- drop it rather than let it complete
+        # against the new one.
+        self._tap_candidate = False
+
+    def _menu_text(self, label: str, shortcut_id: str) -> str:
+        """`label`, plus the shortcut's key right-aligned after a literal
+        tab (QMenu's own convention for a hint with no QShortcut behind
+        it). Just the label when the shortcut is unbound."""
+        binding = self._bindings.binding(shortcut_id)
+        return f"{label}\t{binding}" if binding else label
+
+    def _quick_select_labels(self) -> dict[int, str]:
+        """The one short label each quick-select slot paints inside its tag
+        row's checkbox: the last key of its binding, so a rebind to
+        "Ctrl+Q" still shows something meaningful ("Q") in a box far too
+        small for the whole combination. Slots whose shortcut has been
+        cleared are absent, and paint nothing."""
+        labels: dict[int, str] = {}
+        for slot in range(shortcuts.QUICK_SELECT_SLOT_COUNT):
+            caps = keycaps(self._bindings.binding(shortcuts.quick_select_id(slot)))
+            if caps:
+                labels[slot] = caps[-1]
+        return labels
 
     # -- Session lifecycle --------------------------------------------------
 
@@ -617,24 +710,29 @@ class MainWindow(QMainWindow):
         model = self.item_tag_panel.model
         index = model.index(row, 0)
         active_selected = self._tag_shortcut_mode_action.isChecked()
-        role = CheckedShortcutRole if active_selected else UncheckedShortcutRole
-        digit = model.data(index, role)
-        if not isinstance(digit, int):
+        role = CheckedSlotRole if active_selected else UncheckedSlotRole
+        slot = model.data(index, role)
+        binding = (
+            self._bindings.binding(shortcuts.quick_select_id(slot)) if isinstance(slot, int) else ""
+        )
+        if not binding:
+            swap_keys = keycaps(self._bindings.binding(shortcuts.SWAP_TAG_NUMBERING))
             row_selected = bool(model.data(index, CheckedRole))
-            if row_selected == active_selected:
-                # This row's own group already has the numbering -- it's
-                # just past the first 10 tags in it (see
-                # `_shortcut_digit_for_position`). Ctrl can't add a digit
-                # here; it would only take the numbering away from this
-                # row's whole group and give it to the other one, so there's
-                # no move that actually helps this row.
+            if row_selected == active_selected or not swap_keys:
+                # Either this row's own group already has the numbering
+                # (it's just past the numbered slots, see
+                # `_slot_for_position`), in which case swapping would only
+                # take the numbering away from its whole group and give it
+                # to the other one -- no move that actually helps this row
+                # -- or the swap gesture is unbound, so there's no move to
+                # suggest at all.
                 self._hover_bar.clear()
                 return
             group = "selected" if row_selected else "unselected"
-            self._hover_bar.show_hint(("Ctrl",), f"Move quick-select shortcuts to {group} tags")
+            self._hover_bar.show_hint(swap_keys, f"Move quick-select shortcuts to {group} tags")
             return
         tag = model.tag_at(row)
-        self._hover_bar.show_hint((str(digit),), f'Toggle "{tag.name}" on the current item')
+        self._hover_bar.show_hint(keycaps(binding), f'Toggle "{tag.name}" on the current item')
 
     def _on_item_create_and_check(self, name: str) -> None:
         tag = self._create_tag_and_find(name)
@@ -686,9 +784,9 @@ class MainWindow(QMainWindow):
         self.menuBar().setVisible(visible)
         self.statusBar().setVisible(visible)
 
-    def _on_toggle_tag_shortcut(self, digit: int) -> None:
-        tag_id = self.item_tag_panel.model.tag_id_for_shortcut(
-            digit, selected=self._tag_shortcut_mode_action.isChecked()
+    def _on_toggle_tag_shortcut(self, slot: int) -> None:
+        tag_id = self.item_tag_panel.model.tag_id_for_slot(
+            slot, selected=self._tag_shortcut_mode_action.isChecked()
         )
         if tag_id is not None:
             self._on_item_tag_toggle(tag_id)
@@ -721,51 +819,37 @@ class MainWindow(QMainWindow):
     # -- Keyboard -------------------------------------------------------------
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if QApplication.activeModalWidget() is not None:
+            # A modal dialog owns input while it's up -- most of all the
+            # Settings window, where the whole point of a keystroke is to
+            # be captured as a new binding rather than to fire the command
+            # it's currently bound to. (Qt already blocks the menu actions'
+            # own QShortcuts under modality; this is the same rule for the
+            # shortcuts dispatched by hand below it.)
+            return super().eventFilter(watched, event)
         if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
             if not event.isAutoRepeat():
-                if event.key() == Qt.Key.Key_Control:
-                    self._ctrl_tap_candidate = True
-                else:
-                    # Some other key went down while Ctrl may or may not be
-                    # held -- either way, a later Ctrl release no longer
-                    # counts as "tapped alone." Harmless no-op if Ctrl was
-                    # never down to begin with.
-                    self._ctrl_tap_candidate = False
-            if event.key() == Qt.Key.Key_Escape:
-                handled = False
-                if self._focus_is_text_editing():
-                    self._dismiss_typing_focus()
-                    handled = True
-                if self._focus_mode_action.isChecked():
-                    # The reliable way out of focus mode -- Space alone
-                    # can't be, since it's claimed by the viewer's own
-                    # play/pause shortcut whenever a video is showing (see
-                    # keyboard.py's module docstring).
-                    self._focus_mode_action.setChecked(False)
-                    handled = True
-                if handled:
-                    event.accept()
-                    return True
-            if event.key() == Qt.Key.Key_Tab and self._cycle_tag_search_focus():
+                # Some other key going down while the tap modifier may or
+                # may not be held means a later release of it no longer
+                # counts as "tapped alone" -- it was held as a modifier for
+                # something else instead. Harmless no-op if it was never
+                # down to begin with.
+                self._tap_candidate = (
+                    self._tap_modifier_key is not None and event.key() == self._tap_modifier_key
+                )
+            pressed = key_text(event)
+            if pressed is not None and self._handle_dismiss(pressed):
                 event.accept()
                 return True
-            if self._focus_is_text_editing():
-                digit = DIGIT_KEYS.get(event.key())
-                if digit is not None:
-                    if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                        # Letting this fall through unhandled does not, in
-                        # practice, type the digit -- Windows hands Qt an
-                        # empty text() for most Ctrl+digit combinations
-                        # (confirmed empirically), so QLineEdit would
-                        # insert nothing on its own. Inserted directly
-                        # instead, which is also why this has to live here
-                        # rather than in KeyboardController: it needs the
-                        # actual focused widget, not just a key string.
-                        focused = QApplication.focusWidget()
-                        if isinstance(focused, QLineEdit):
-                            focused.insert(str(digit))
-                    else:
-                        self._on_toggle_tag_shortcut(digit)
+            if (
+                pressed is not None
+                and pressed == self._bindings.binding(shortcuts.FOCUS_TAG_SEARCH)
+                and self._cycle_tag_search_focus()
+            ):
+                event.accept()
+                return True
+            if pressed is not None and self._focus_is_text_editing():
+                if self._handle_quick_select_while_typing(pressed):
                     event.accept()
                     return True
             if self.session is not None and self.keyboard.handle_key_press(
@@ -774,18 +858,78 @@ class MainWindow(QMainWindow):
                 event.accept()
                 return True
         elif event.type() == QEvent.Type.KeyRelease and isinstance(event, QKeyEvent):
-            if event.key() == Qt.Key.Key_Control and not event.isAutoRepeat():
-                if self._ctrl_tap_candidate:
+            if (
+                self._tap_modifier_key is not None
+                and event.key() == self._tap_modifier_key
+                and not event.isAutoRepeat()
+            ):
+                if self._tap_candidate:
                     self._toggle_tag_shortcut_mode()
-                self._ctrl_tap_candidate = False
+                self._tap_candidate = False
             # Deliberately not consumed either way -- this is an
             # observation of the release, not a binding on it.
         elif event.type() == QEvent.Type.MouseButtonPress:
-            # A Ctrl+click (of whatever kind, anywhere) is a held modifier
-            # doing something else, same as a Ctrl+key combo above -- its
-            # eventual Ctrl release shouldn't also toggle the tag numbering.
-            self._ctrl_tap_candidate = False
+            # A modifier+click (of whatever kind, anywhere) is a held
+            # modifier doing something else, same as a modifier+key combo
+            # above -- its eventual release shouldn't also toggle the tag
+            # numbering.
+            self._tap_candidate = False
         return super().eventFilter(watched, event)
+
+    def _handle_dismiss(self, pressed: str) -> bool:
+        """The Dismiss shortcut: leave a tag search box, and/or leave focus
+        mode. Returns whether it did either.
+
+        Escape exits focus mode even when Dismiss has been rebound off it
+        or cleared entirely. That's a deliberate safety hatch rather than a
+        hidden binding: focus mode hides the menu bar, so a user who
+        unbinds both Dismiss and Focus Mode would otherwise have no way
+        back out short of quitting the app."""
+        dismiss = self._bindings.binding(shortcuts.DISMISS)
+        is_dismiss = bool(dismiss) and pressed == dismiss
+        if not is_dismiss:
+            if pressed == "Esc" and self._focus_mode_action.isChecked():
+                self._focus_mode_action.setChecked(False)
+                return True
+            return False
+        handled = False
+        if self._focus_is_text_editing():
+            self._dismiss_typing_focus()
+            handled = True
+        if self._focus_mode_action.isChecked():
+            # The reliable way out of focus mode -- Focus Mode's own key
+            # can't be, since it's claimed by the viewer's play/pause
+            # shortcut whenever a video is showing and the two share a
+            # default (see keyboard.py's module docstring).
+            self._focus_mode_action.setChecked(False)
+            handled = True
+        return handled
+
+    def _handle_quick_select_while_typing(self, pressed: str) -> bool:
+        """Quick-select tag shortcuts keep working while a text box has
+        focus -- and Ctrl+<the same key> types the character instead, so a
+        key spent on quick-select is still typeable.
+
+        Both halves live here rather than in `KeyboardController` because
+        the second one needs the actual focused widget, not just a key
+        string: letting a Ctrl+digit `QKeyEvent` fall through unhandled
+        does not, in practice, type anything, since Windows hands Qt an
+        empty `text()` for most Ctrl+digit combinations (confirmed
+        empirically). Without inserting it directly, spending a digit on
+        quick-select would silently make it untypable in these fields even
+        with Ctrl held."""
+        slot = self._bindings.quick_select_slot(pressed)
+        if slot is not None:
+            self._on_toggle_tag_shortcut(slot)
+            return True
+        base = strip_control(pressed)
+        if base is None or self._bindings.quick_select_slot(base) is None:
+            return False
+        character = literal_character(base)
+        focused = QApplication.focusWidget()
+        if character is not None and isinstance(focused, QLineEdit):
+            focused.insert(character)
+        return True
 
     def _cycle_tag_search_focus(self) -> bool:
         """If focus is currently in one of the two tag search boxes, advance

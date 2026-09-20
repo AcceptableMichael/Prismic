@@ -366,6 +366,113 @@ QMessageBox {{
     background: {BG_PANEL};
 }}
 
+/* -- Settings window ----------------------------------------------------
+   The sidebar reads as a distinct surface from the panel it's selecting,
+   which is the whole point of splitting them -- hence the raised panel
+   background and the border between the two, rather than the flat
+   single-surface look the rest of the app uses. */
+
+QDialog#settingsDialog {{
+    background: {BG_APP};
+}}
+QListWidget#settingsPanelList {{
+    background: {BG_PANEL};
+    border: none;
+    border-right: 1px solid {BORDER_SUBTLE};
+    padding: 8px 6px;
+    font-size: 12px;
+}}
+QListWidget#settingsPanelList::item {{
+    padding: 7px 10px;
+    border-radius: 5px;
+    color: {TEXT_SECONDARY};
+}}
+QListWidget#settingsPanelList::item:hover {{
+    background: {HOVER_WASH};
+}}
+QListWidget#settingsPanelList::item:selected {{
+    background: {ACCENT_MUTED_STRONG};
+    color: {TEXT_PRIMARY};
+}}
+QWidget#settingsFooter {{
+    background: {BG_PANEL};
+    border-top: 1px solid {BORDER_SUBTLE};
+    padding: 10px 12px;
+}}
+QScrollArea#settingsScroll, QScrollArea#settingsScroll > QWidget > QWidget {{
+    background: {BG_APP};
+}}
+QLineEdit#settingsSearchBox {{
+    font-size: 12px;
+}}
+
+QLabel#shortcutLabel {{
+    color: {TEXT_PRIMARY};
+    font-size: 12px;
+}}
+QLabel#shortcutDescription {{
+    color: {TEXT_MUTED};
+    font-size: 11px;
+}}
+QLabel#shortcutConflict {{
+    color: {DANGER};
+    font-size: 11px;
+}}
+QFrame#rowSeparator {{
+    background: {BORDER_SUBTLE};
+    border: none;
+}}
+
+/* The capture button reads as a key slot rather than a button: the same
+   green keycap border the status-bar hints use, so "this is a key" is
+   the same visual idea in both places. While it's waiting for a
+   keystroke (Qt's checked state) it fills with the accent so it's
+   obvious which of ~two dozen rows is listening. */
+QPushButton#shortcutCaptureButton {{
+    background: {BG_PANEL_RAISED};
+    border: 1px solid {KEYCAP_BORDER};
+    border-radius: 5px;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 600;
+}}
+QPushButton#shortcutCaptureButton:hover {{
+    background: {HOVER_WASH};
+}}
+QPushButton#shortcutCaptureButton:checked {{
+    background: {ACCENT_MUTED_STRONG};
+    border-color: {ACCENT_HOVER};
+    color: {TEXT_PRIMARY};
+}}
+QPushButton#shortcutCaptureButton[unset="true"] {{
+    border: 1px dashed {BORDER};
+    color: {TEXT_MUTED};
+    font-weight: 400;
+}}
+QPushButton#shortcutSmallButton {{
+    padding: 5px 10px;
+    font-size: 11px;
+}}
+QComboBox#tapModifierCombo {{
+    background: {BG_PANEL_RAISED};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {KEYCAP_BORDER};
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-size: 11px;
+}}
+QComboBox#tapModifierCombo::drop-down {{
+    border: none;
+    width: 18px;
+}}
+QComboBox QAbstractItemView {{
+    background: {BG_PANEL_RAISED};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER};
+    selection-background-color: {ACCENT_MUTED_STRONG};
+    outline: none;
+}}
+
 QToolTip {{
     background: {BG_PANEL_RAISED};
     color: {TEXT_PRIMARY};

@@ -1,0 +1,362 @@
+from pathlib import Path
+
+import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMessageBox
+from pytestqt.qtbot import QtBot
+
+from prismic.application.input import shortcuts
+from prismic.application.input.shortcuts import SHORTCUTS, ShortcutBindings
+from prismic.persistence.preferences import PreferencesStore
+from prismic.ui.settings_dialog import (
+    KeyCaptureButton,
+    SettingsDialog,
+    ShortcutRow,
+    TapModifierCombo,
+    binding_display,
+)
+
+
+@pytest.fixture
+def bindings(tmp_path: Path) -> ShortcutBindings:
+    return ShortcutBindings(PreferencesStore(tmp_path / "preferences.json"))
+
+
+@pytest.fixture
+def dialog(qtbot: QtBot, bindings: ShortcutBindings) -> SettingsDialog:
+    window = SettingsDialog(bindings)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    return window
+
+
+def row_for(dialog: SettingsDialog, shortcut_id: str) -> ShortcutRow:
+    for row in dialog.shortcuts_panel.rows:
+        if row.definition.id == shortcut_id:
+            return row
+    raise AssertionError(f"no row for {shortcut_id}")
+
+
+def accept_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer Yes to every confirmation the dialog raises, so a test can
+    drive a flow that passes through one without blocking on it."""
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes
+    )
+
+
+# -- The panel lists everything ----------------------------------------------
+
+
+def test_the_dialog_has_a_shortcuts_panel(dialog: SettingsDialog) -> None:
+    assert dialog.panel_list.count() == 1
+    assert dialog.panel_list.item(0).text() == "Shortcuts"
+
+
+def test_every_registered_shortcut_gets_a_row(dialog: SettingsDialog) -> None:
+    """The whole point of the panel: not a hand-written list that drifts
+    from the registry, but one row per `ShortcutDefinition`."""
+    listed = [row.definition.id for row in dialog.shortcuts_panel.rows]
+
+    assert listed == [definition.id for definition in SHORTCUTS]
+
+
+def test_each_row_shows_the_key_currently_bound(dialog: SettingsDialog) -> None:
+    editor = row_for(dialog, shortcuts.OPEN_COLLECTION_FILE)._editor
+    assert isinstance(editor, KeyCaptureButton)
+
+    assert editor.text() == "Ctrl + Shift + O"
+
+
+def test_a_tap_modifier_shortcut_gets_a_chooser_not_a_capture_box(
+    dialog: SettingsDialog,
+) -> None:
+    """A tap-alone gesture can't be captured by pressing the modifier --
+    that's indistinguishable from starting Ctrl+something."""
+    assert isinstance(row_for(dialog, shortcuts.SWAP_TAG_NUMBERING)._editor, TapModifierCombo)
+    assert isinstance(row_for(dialog, shortcuts.RESCAN)._editor, KeyCaptureButton)
+
+
+def test_an_unbound_shortcut_reads_as_not_set(
+    dialog: SettingsDialog, bindings: ShortcutBindings
+) -> None:
+    bindings.set_binding(shortcuts.RESCAN, "")
+    dialog.shortcuts_panel.refresh()
+
+    editor = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(editor, KeyCaptureButton)
+    assert editor.text() == "Not set"
+
+
+# -- Searching -----------------------------------------------------------------
+
+
+def test_the_search_box_narrows_the_list(dialog: SettingsDialog) -> None:
+    dialog.shortcuts_panel.search_box.setText("rescan")
+
+    visible = [row.definition.id for row in dialog.shortcuts_panel.visible_rows()]
+    assert visible == [shortcuts.RESCAN]
+
+
+def test_the_search_box_also_matches_the_key_itself(dialog: SettingsDialog) -> None:
+    """Answering "what's on Ctrl+T again?" should be possible by typing
+    the key, not just the feature's name."""
+    dialog.shortcuts_panel.search_box.setText("ctrl + t")
+
+    visible = [row.definition.id for row in dialog.shortcuts_panel.visible_rows()]
+    assert visible == [shortcuts.TOGGLE_THUMBNAILS]
+
+
+def test_clearing_the_search_box_brings_every_row_back(dialog: SettingsDialog) -> None:
+    dialog.shortcuts_panel.search_box.setText("rescan")
+    dialog.shortcuts_panel.search_box.setText("")
+
+    assert len(dialog.shortcuts_panel.visible_rows()) == len(SHORTCUTS)
+
+
+# -- Capturing a new key --------------------------------------------------------
+
+
+def test_clicking_the_key_box_starts_capturing(qtbot: QtBot, dialog: SettingsDialog) -> None:
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    assert button.is_capturing
+    assert button.text() == "Press a key…"
+
+
+def test_pressing_a_key_while_capturing_rebinds_the_shortcut(
+    qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
+) -> None:
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    qtbot.keyClick(button, Qt.Key.Key_F5)
+
+    assert bindings.binding(shortcuts.RESCAN) == "F5"
+    assert not button.is_capturing
+    assert button.text() == "F5"
+
+
+def test_capturing_records_the_modifiers_too(
+    qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
+) -> None:
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    qtbot.keyClick(
+        button,
+        Qt.Key.Key_K,
+        Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier,
+    )
+
+    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+Alt+K"
+
+
+def test_a_bare_modifier_does_not_end_the_capture(qtbot: QtBot, dialog: SettingsDialog) -> None:
+    """Ctrl on its own is the user starting a combination, not finishing
+    one -- the box keeps waiting for the rest."""
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    qtbot.keyPress(button, Qt.Key.Key_Control)
+
+    assert button.is_capturing
+
+
+def test_escape_cancels_a_capture_without_changing_anything(
+    qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
+) -> None:
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    qtbot.keyClick(button, Qt.Key.Key_Escape)
+
+    assert not button.is_capturing
+    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
+    assert dialog.isVisible()  # and it didn't close the dialog either
+
+
+def test_capturing_tab_binds_tab_rather_than_moving_focus(
+    qtbot: QtBot,
+    dialog: SettingsDialog,
+    bindings: ShortcutBindings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every key Qt normally spends on its own navigation has to be
+    bindable -- Tab most of all, since it's a real default here. (It's
+    already taken by the tag-search cycle, hence the conflict prompt.)"""
+    accept_all(monkeypatch)
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    qtbot.keyClick(button, Qt.Key.Key_Tab)
+
+    assert bindings.binding(shortcuts.RESCAN) == "Tab"
+
+
+def test_capturing_space_binds_space_rather_than_re_pressing_the_button(
+    qtbot: QtBot,
+    dialog: SettingsDialog,
+    bindings: ShortcutBindings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Space would otherwise activate the focused capture button itself,
+    ending the capture instead of being recorded by it."""
+    accept_all(monkeypatch)
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    qtbot.keyClick(button, Qt.Key.Key_Space)
+
+    assert bindings.binding(shortcuts.RESCAN) == "Space"
+
+
+def test_choosing_a_tap_modifier_rebinds_the_gesture(
+    dialog: SettingsDialog, bindings: ShortcutBindings
+) -> None:
+    combo = row_for(dialog, shortcuts.SWAP_TAG_NUMBERING)._editor
+    assert isinstance(combo, TapModifierCombo)
+
+    combo.setCurrentIndex(combo.findData("Alt"))
+
+    assert bindings.binding(shortcuts.SWAP_TAG_NUMBERING) == "Alt"
+
+
+# -- Clearing and resetting ------------------------------------------------------
+
+
+def test_clear_unbinds_the_shortcut(
+    qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
+) -> None:
+    row = row_for(dialog, shortcuts.RESCAN)
+
+    qtbot.mouseClick(row._clear_button, Qt.MouseButton.LeftButton)
+
+    assert bindings.binding(shortcuts.RESCAN) == ""
+
+
+def test_reset_is_only_offered_once_a_shortcut_has_been_changed(
+    qtbot: QtBot, dialog: SettingsDialog
+) -> None:
+    row = row_for(dialog, shortcuts.RESCAN)
+    assert not row._reset_button.isEnabled()
+
+    qtbot.mouseClick(row._clear_button, Qt.MouseButton.LeftButton)
+
+    assert row._reset_button.isEnabled()
+
+
+def test_reset_puts_a_shortcut_back(
+    qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
+) -> None:
+    row = row_for(dialog, shortcuts.RESCAN)
+    qtbot.mouseClick(row._clear_button, Qt.MouseButton.LeftButton)
+
+    qtbot.mouseClick(row._reset_button, Qt.MouseButton.LeftButton)
+
+    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
+
+
+def test_restore_all_defaults_resets_every_shortcut(
+    qtbot: QtBot,
+    dialog: SettingsDialog,
+    bindings: ShortcutBindings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    accept_all(monkeypatch)
+    bindings.set_binding(shortcuts.RESCAN, "F5")
+    bindings.set_binding(shortcuts.NAVIGATE_NEXT, "F6")
+
+    qtbot.mouseClick(dialog.shortcuts_panel._restore_button, Qt.MouseButton.LeftButton)
+
+    assert all(bindings.is_default(definition.id) for definition in SHORTCUTS)
+
+
+# -- Conflicts ---------------------------------------------------------------------
+
+
+def test_taking_a_key_from_another_shortcut_asks_first_and_clears_it(
+    qtbot: QtBot,
+    dialog: SettingsDialog,
+    bindings: ShortcutBindings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    accept_all(monkeypatch)
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    qtbot.keyClick(button, Qt.Key.Key_T, Qt.KeyboardModifier.ControlModifier)
+
+    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+T"
+    assert bindings.binding(shortcuts.TOGGLE_THUMBNAILS) == ""
+
+
+def test_declining_the_conflict_leaves_both_shortcuts_alone(
+    qtbot: QtBot,
+    dialog: SettingsDialog,
+    bindings: ShortcutBindings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Cancel
+    )
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    qtbot.keyClick(button, Qt.Key.Key_T, Qt.KeyboardModifier.ControlModifier)
+
+    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
+    assert bindings.binding(shortcuts.TOGGLE_THUMBNAILS) == "Ctrl+T"
+
+
+def test_a_conflict_already_in_the_file_is_shown_on_both_rows(
+    qtbot: QtBot, bindings: ShortcutBindings
+) -> None:
+    """A hand-edited preferences file can produce a collision no prompt
+    ever guarded, so the rows say so rather than silently leaving one of
+    the two shortcuts dead."""
+    bindings.set_binding(shortcuts.RESCAN, "Ctrl+T")
+    dialog = SettingsDialog(bindings)
+    qtbot.addWidget(dialog)
+
+    assert row_for(dialog, shortcuts.RESCAN)._conflict.isVisibleTo(dialog)
+    assert row_for(dialog, shortcuts.TOGGLE_THUMBNAILS)._conflict.isVisibleTo(dialog)
+
+
+def test_sharing_a_key_across_input_contexts_is_not_a_conflict(
+    qtbot: QtBot, dialog: SettingsDialog
+) -> None:
+    """Focus Mode and the viewer's play/pause both ship on Space by
+    design -- flagging the app's own defaults would make the warning
+    worthless."""
+    assert not row_for(dialog, shortcuts.FOCUS_MODE)._conflict.isVisibleTo(dialog)
+    assert not row_for(dialog, shortcuts.VIEWER_PLAY_PAUSE)._conflict.isVisibleTo(dialog)
+
+
+# -- Reporting changes back -----------------------------------------------------------
+
+
+def test_the_dialog_reports_every_change_so_the_app_can_re_apply_it(
+    qtbot: QtBot, dialog: SettingsDialog
+) -> None:
+    row = row_for(dialog, shortcuts.RESCAN)
+
+    with qtbot.waitSignal(dialog.bindings_changed, timeout=1000):
+        qtbot.mouseClick(row._clear_button, Qt.MouseButton.LeftButton)
+
+
+def test_binding_display_spells_out_an_unbound_shortcut() -> None:
+    assert binding_display("") == "Not set"
+    assert binding_display("Ctrl+R") == "Ctrl + R"

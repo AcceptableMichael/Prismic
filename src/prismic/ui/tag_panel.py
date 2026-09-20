@@ -120,6 +120,13 @@ class TagPanel(QWidget):
         set."""
         self._delegate.set_show_checked_shortcuts(selected)
 
+    def set_shortcut_labels(self, labels: dict[int, str]) -> None:
+        """Which key label each quick-select slot paints in its checkbox.
+
+        Same caveat as `set_shortcut_mode_selected`: only a panel built
+        with `show_shortcuts` paints them at all."""
+        self._delegate.set_shortcut_labels(labels)
+
     def _unchecked_matches(self, query: str) -> list[Tag]:
         query = query.strip().lower()
         unchecked = [t for t in self._tags if t.id not in self._checked_ids]
