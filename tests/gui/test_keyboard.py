@@ -182,7 +182,7 @@ def test_global_shortcuts_still_work_when_the_result_list_has_focus(
     routing through a child widget and so never caught this. Fixed by
     intercepting keys via an application-level event filter instead.
 
-    A lone "Tab" (once its short chord window elapses with nothing else
+    A lone "Tab" (once its chord window elapses with nothing else
     following) focuses the item-tag ("Edit this file") search box; "Tab"
     "Tab" focuses the filter search box instead (see `KeyboardController`'s
     `on_focus_item_tags`/`on_focus_filter` wiring in `MainWindow`) --
@@ -193,7 +193,9 @@ def test_global_shortcuts_still_work_when_the_result_list_has_focus(
 
     qtbot.keyClick(window.result_list, Qt.Key.Key_Tab)
 
-    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+    # The lone-Tab fallback waits out the full chord timeout (matches "t"'s
+    # own, currently 1.5s) -- see keyboard.py's module docstring for why.
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=3000)
 
     window.result_list.setFocus()
     qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)

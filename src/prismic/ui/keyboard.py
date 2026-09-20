@@ -15,13 +15,14 @@ has viewer-specific keys that would conflict with a global one.
 
 Two independent chords exist ("t" + digit, "Tab" + "Tab"), each with its
 own `ChordState`/timer rather than sharing one: they resolve to different
-things when a *lone* first key times out with nothing else pending. "t"
-alone resolves to nothing -- it's genuinely dead air, fine to sit pending
-for a leisurely 1.5s. A lone "Tab" is not dead air; it's a real, frequently
--used command in its own right (focus the item-tag box), so making it wait
-out the same 1.5s before firing would make the common case feel sluggish.
-It gets its own, much shorter timeout instead -- long enough to catch a
-deliberate second Tab, short enough that a lone Tab still feels immediate.
+things when a *lone* first key times out with nothing else pending -- "t"
+alone resolves to nothing, a lone "Tab" focuses the item-tag box. A short
+-lived first attempt gave the Tab chord its own much shorter timeout on the
+theory that a lone Tab is a frequent command and shouldn't feel sluggish,
+but a short window made the deliberate double-Tab unreliable to land in
+practice, which matters more -- both chords now share the same timeout
+(`_CHORD_TIMEOUT_SECONDS`), the Tab chord just via its own ChordState/timer
+instance rather than by merging tables.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from prismic.application.input.chord import ChordState
 from prismic.application.input.resolver import InputContext, InputEvent, InputResolver
 
 _CHORD_TIMEOUT_SECONDS = 1.5
-_TAB_CHORD_TIMEOUT_SECONDS = 0.4
+_TAB_CHORD_TIMEOUT_SECONDS = _CHORD_TIMEOUT_SECONDS
 
 # "t" then a digit 1-9 toggles the Nth tag (in list order) on the current
 # item -- one chord covers both "apply" and "remove" (whichever it isn't
