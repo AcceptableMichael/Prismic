@@ -193,6 +193,12 @@ class TagRowDelegate(QStyledItemDelegate):
             painter.drawLine(cx + 1, cy - 1, cx + 1, cy + 3)
 
     def _paint_shortcut_digit(self, painter: QPainter, checkbox_rect: QRect, digit: int) -> None:
+        # save()/restore() bracket the font change specifically -- paint()'s
+        # own save()/restore() at the call-site level wasn't enough, since
+        # this runs *before* the tag-name text further down in the same
+        # paint() call, which would otherwise inherit this small bold font
+        # instead of the row's normal one.
+        painter.save()
         # One consistent green regardless of the checkbox's own outlined
         # (unchecked) or filled (checked) look -- not tuned separately per
         # background, since that look is due for a revisit anyway.
@@ -201,7 +207,15 @@ class TagRowDelegate(QStyledItemDelegate):
         font.setPixelSize(_SHORTCUT_DIGIT_PIXEL_SIZE)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(checkbox_rect, Qt.AlignmentFlag.AlignCenter, str(digit))
+        # AlignCenter centers on the font's full ascent+descent box, which
+        # sits visibly below true optical center for a bold digit at this
+        # size -- nudged up to compensate (checked empirically by grabbing
+        # the painted row to a PNG and comparing against the checkbox's
+        # actual pixel center).
+        painter.drawText(
+            checkbox_rect.adjusted(0, -1, 0, -1), Qt.AlignmentFlag.AlignCenter, str(digit)
+        )
+        painter.restore()
 
     def editorEvent(
         self,

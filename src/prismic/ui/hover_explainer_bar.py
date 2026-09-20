@@ -10,6 +10,7 @@ called with. `hover_hint.HoverHintController` (static widgets/actions) and
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 
@@ -53,5 +54,12 @@ class HoverExplainerBar(QWidget):
         for key in keys:
             label = QLabel(key)
             label.setObjectName("keycap")
+            # QLabel defaults to left+vcenter, which reads fine for a
+            # multi-character label like "Tab" or "Ctrl" but visibly
+            # left-shifts a single narrow digit like "1" -- this font's
+            # digits share a uniform (tabular) advance width for lining up
+            # in numeric text, so a "1"'s actual ink sits well left of
+            # center within that full-width box unless centered explicitly.
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._key_labels.append(label)
             self._keys_layout.addWidget(label)
