@@ -6,6 +6,7 @@ viewer — `show_media()` just swaps what's displayed in place.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -22,18 +23,33 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from prismic.application.worker_pool import WorkerPool
 from prismic.media.formats import SUPPORTED_VIDEO_EXTENSIONS
 from prismic.media.image import ImageLoadError, load_image
+from prismic.media.loader import ImageLoader, ImageLoadResult
 from prismic.media.video import VideoPlayer
+from prismic.ui.future_watcher import FutureWatcher
 from prismic.ui.image_view import ImageView
 
 
 class MediaViewer(QWidget):
     load_error = Signal(str)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        worker_pool: Callable[[], WorkerPool | None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("mediaViewer")
+        # Resolved lazily on each load rather than captured once, matching
+        # `ThumbnailDelegate`'s pattern -- the pool a session owns can change
+        # (or become None) across collection open/close, and there's no
+        # session at all yet when MainWindow constructs this widget.
+        self._worker_pool = worker_pool if worker_pool is not None else (lambda: None)
+        self._image_loader = ImageLoader()
+        self._current_request_id = 0
+        self._watchers: list[FutureWatcher] = []
 
         self._image_view = ImageView()
         self._video_widget = QVideoWidget()
@@ -95,13 +111,52 @@ class MediaViewer(QWidget):
     def _show_image(self, path: Path) -> None:
         self._video_player.stop()
         self._controls.setVisible(False)
-        outcome = load_image(path)
-        if isinstance(outcome, ImageLoadError):
-            self.load_error.emit(outcome.reason)
+        pool = self._worker_pool()
+        if pool is None:
+            # No pool available (e.g. a standalone MediaViewer with no
+            # session behind it) -- fall back to the old synchronous decode
+            # rather than silently doing nothing.
+            outcome = load_image(path)
+            if isinstance(outcome, ImageLoadError):
+                self.load_error.emit(outcome.reason)
+                self._stack.setCurrentWidget(self._empty_label)
+                return
+            self._image_view.set_image(outcome)
+            self._stack.setCurrentWidget(self._image_view)
+            return
+
+        self._current_request_id = self._image_loader.begin_request()
+        future = pool.submit(self._image_loader.load, self._current_request_id, path)
+        watcher = FutureWatcher(future, self)
+        self._watchers.append(watcher)
+        watcher.finished.connect(lambda result: self._on_image_loaded(watcher, result))
+
+    def _on_image_loaded(self, watcher: FutureWatcher, result: ImageLoadResult | None) -> None:
+        if watcher in self._watchers:
+            self._watchers.remove(watcher)
+        if result is None:
+            # A newer navigation superseded this request before it finished
+            # -- whatever's now current already has its own load in flight.
+            return
+        if result.error is not None:
+            self.load_error.emit(result.error)
             self._stack.setCurrentWidget(self._empty_label)
             return
-        self._image_view.set_image(outcome)
+        assert result.image is not None
+        self._image_view.set_image(result.image)
         self._stack.setCurrentWidget(self._image_view)
+
+    def preload(self, path: Path) -> None:
+        """Warm the decode cache for a likely-next item (e.g. the neighbor
+        of whatever's currently shown), so paging onto it later is a cache
+        hit instead of a fresh decode.
+        """
+        if path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS:
+            return
+        pool = self._worker_pool()
+        if pool is None:
+            return
+        pool.submit(self._image_loader.preload, self._current_request_id, path)
 
     def _show_video(self, path: Path) -> None:
         self._image_view.clear()

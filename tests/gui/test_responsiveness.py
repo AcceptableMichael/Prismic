@@ -1,10 +1,12 @@
 """Responsiveness under rapid interaction, per Phase 6.
 
-The viewer's image decode is synchronous today (see the Phase 5 phase file
-note on why `ImageLoader`'s generation-staleness machinery isn't wired in
-yet), so there's no genuine async race to provoke here with small test
-fixtures -- what these tests actually guard against is a rapid burst of
-input corrupting `ApplicationState` or crashing the UI outright.
+The viewer now routes image decode through `ImageLoader`'s generation-
+staleness machinery on `PrismicSession.worker_pool` (see `ui/viewer.py`),
+so a rapid burst of navigation genuinely does race in-flight decodes
+against each other. These tests still don't provoke that race directly
+with small fixtures decoding near-instantly -- what they guard against is
+a rapid burst of input corrupting `ApplicationState` or crashing the UI
+outright.
 """
 
 from pathlib import Path

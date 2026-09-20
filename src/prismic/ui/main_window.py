@@ -78,6 +78,9 @@ class MainWindow(QMainWindow):
         self.session: PrismicSession | None = None
         self._future_watchers: list[FutureWatcher] = []
         self._instance_bridge: InstanceBridge | None = None
+        # Sticky last arrow-key direction, so preloading can bias further
+        # ahead of travel than behind -- see _preload_neighbors().
+        self._nav_direction = 1
         # See _stable_item_tags(): the item-tag panel's checked-group
         # ordering for whichever file is current, held stable across
         # add/remove until that file changes.
@@ -175,7 +178,9 @@ class MainWindow(QMainWindow):
         self.result_list.setItemDelegate(self._thumbnail_delegate)
         self.result_list.selectionModel().currentChanged.connect(self._on_result_selection_changed)
 
-        self.viewer = MediaViewer()
+        self.viewer = MediaViewer(
+            worker_pool=lambda: self.session.worker_pool if self.session is not None else None
+        )
         self.viewer.load_error.connect(self._on_viewer_error)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -451,6 +456,32 @@ class MainWindow(QMainWindow):
             self.viewer.clear()
             return
         self.viewer.show_media(self.session.collection.root / media.relative_path)
+        self._preload_neighbors(current)
+
+    def _preload_neighbors(self, current: int) -> None:
+        """Warm the decode cache for the items around `current`, so
+        arrow-key paging is usually a cache hit by the time the user
+        actually lands on the next item.
+
+        Biased two items ahead in `self._nav_direction` (the last arrow key
+        pressed) and one behind: someone paging through a set of photos
+        almost always keeps going the same way, including holding the key
+        down or pressing it faster than one decode takes -- two-ahead is
+        what keeps up with that, not just the single immediate neighbor.
+        """
+        assert self.session is not None
+        result_set = self.session.state.result_set
+        if current not in result_set:
+            return
+        index = result_set.index(current)
+        root = self.session.collection.root
+        ahead = self._nav_direction
+        for offset in (ahead, 2 * ahead, -ahead):
+            neighbor_index = index + offset
+            if 0 <= neighbor_index < len(result_set):
+                media = self.session.media.get(result_set[neighbor_index])
+                if media is not None:
+                    self.viewer.preload(root / media.relative_path)
 
     # -- User interaction -----------------------------------------------------
 
@@ -470,6 +501,7 @@ class MainWindow(QMainWindow):
         result_set = self.session.state.result_set
         if not result_set:
             return
+        self._nav_direction = 1 if delta >= 0 else -1
         current = self.session.state.current_item
         if current is None or current not in result_set:
             new_index = 0

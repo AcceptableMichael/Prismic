@@ -65,12 +65,15 @@ and replaces the Phase 0 placeholder window.
       "Tags on this item" panel — checking a tag there dispatches
       `MappingAddCommand`/`MappingRemoveCommand` without leaving the viewer
 - [x] Viewer stays responsive during navigation — backed directly by Phase
-      4's `ImageLoader`/cache (`media/image.py::load_image` decodes
-      per-call; the viewer itself doesn't yet route through
-      `ImageLoader`'s generation-staleness machinery, since navigation here
-      is synchronous and fast enough at this collection scale not to need
-      it — revisit if large collections or slow storage make decode
-      latency actually visible)
+      4's `ImageLoader`/cache. Originally left synchronous (deferred until
+      decode latency became actually visible); revisited 2026-09-19 once it
+      did — `MediaViewer` now decodes on `PrismicSession.worker_pool` via
+      `ImageLoader`'s generation-staleness machinery + `FutureWatcher`
+      (same pattern as `ThumbnailProvider`), and `MainWindow` preloads the
+      immediate neighbors of the current item on every navigation so paging
+      is usually a cache hit. Falls back to the old synchronous decode when
+      no worker pool is available (e.g. a standalone `MediaViewer` with no
+      session behind it).
 
 ## Keyboard input layer
 
