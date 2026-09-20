@@ -133,10 +133,13 @@ Unless told otherwise, when given a goal:
    verification pass already opened one, that same instance satisfies this
    (no need to close-and-reopen again immediately after). If the human's own
    instance is already open when you start (check `Get-Process`, don't just
-   assume), don't touch it mid-task -- do your own verification in a
-   separate instance against a throwaway collection, and only close/relaunch
-   *their* instance once the change is actually complete, since that's the
-   one they'll look at.
+   assume), close it by its specific PID (never a blanket
+   `taskkill //IM prismic.exe` -- see
+   [[feedback-no-blanket-taskkill]] in Claude's memory) and just keep
+   working with your own instance from then on for both verification and
+   the final hand-back -- no separate throwaway collection/instance dance.
+   The human would rather have their window replaced by a working one than
+   have it left alone while a second instance runs invisibly alongside.
 7. Summarize what changed and how you verified it when you report back.
 
 ## 2026-09-16: computer-use + this app's window — root cause found
