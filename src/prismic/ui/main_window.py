@@ -93,7 +93,6 @@ class MainWindow(QMainWindow):
             on_navigate_next=lambda: self._navigate(1),
             on_undo=self._undo,
             on_focus_item_tags=self.item_tag_panel.focus_search,
-            on_focus_filter=self.filter_panel.focus_search,
             on_toggle_tag_by_index=self._toggle_tag_by_index,
             on_chord_status_changed=self._transient_bar.show_message,
             parent=self,
@@ -610,15 +609,37 @@ class MainWindow(QMainWindow):
     # -- Keyboard -------------------------------------------------------------
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if (
-            event.type() == QEvent.Type.KeyPress
-            and self.session is not None
-            and isinstance(event, QKeyEvent)
-            and self.keyboard.handle_key_press(event, text_editing=self._focus_is_text_editing())
-        ):
-            event.accept()
-            return True
+        if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
+            if event.key() == Qt.Key.Key_Tab and self._cycle_tag_search_focus():
+                event.accept()
+                return True
+            if self.session is not None and self.keyboard.handle_key_press(
+                event, text_editing=self._focus_is_text_editing()
+            ):
+                event.accept()
+                return True
         return super().eventFilter(watched, event)
+
+    def _cycle_tag_search_focus(self) -> bool:
+        """If focus is currently in one of the two tag search boxes, move
+        it to the other one and report the key as handled.
+
+        Handled here, as a direct widget-identity check, rather than via
+        `QWidget.setTabOrder`: Qt's tab-order chain is one single shared
+        list for the whole window, and `setTabOrder(A, B)` only repositions
+        a pair *within* it -- it can't carve out a closed 2-widget loop
+        excluding every other focusable widget, which is what "Tab between
+        just these two boxes" actually requires. Confirmed by trying it:
+        `setTabOrder(A, B)` then `setTabOrder(B, A)` leaves A pointing at
+        whatever followed B beforehand, not back at B."""
+        focused = QApplication.focusWidget()
+        if focused is self.item_tag_panel.search_box:
+            self.filter_panel.search_box.setFocus()
+            return True
+        if focused is self.filter_panel.search_box:
+            self.item_tag_panel.search_box.setFocus()
+            return True
+        return False
 
     @staticmethod
     def _focus_is_text_editing() -> bool:
