@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QScrollArea, QWidget
 from pytestqt.qtbot import QtBot
 
 from prismic.application.input import shortcuts
@@ -168,6 +168,25 @@ def test_a_bare_modifier_does_not_end_the_capture(qtbot: QtBot, dialog: Settings
     qtbot.keyPress(button, Qt.Key.Key_Control)
 
     assert button.is_capturing
+
+
+def test_closing_the_window_mid_capture_releases_the_keyboard(
+    qtbot: QtBot, dialog: SettingsDialog
+) -> None:
+    """`grabKeyboard()` is application-wide: a grab left held by a hidden
+    (or destroyed) widget would take every keystroke in the app with
+    nothing on screen to explain why. Losing focus is the usual way out,
+    but closing the window mid-capture doesn't reliably deliver a
+    focus-out first."""
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+    assert button.is_capturing
+
+    dialog.close()
+
+    assert not button.is_capturing
+    assert QWidget.keyboardGrabber() is not button
 
 
 def test_escape_cancels_a_capture_without_changing_anything(
@@ -360,3 +379,57 @@ def test_the_dialog_reports_every_change_so_the_app_can_re_apply_it(
 def test_binding_display_spells_out_an_unbound_shortcut() -> None:
     assert binding_display("") == "Not set"
     assert binding_display("Ctrl+R") == "Ctrl + R"
+
+
+# -- Opening without a flash ---------------------------------------------------
+# Both of these were a visible flicker on the real window, found by
+# logging the dialog's events across its first frames rather than by
+# looking at it -- the whole thing is over in well under one frame's
+# worth of wall clock.
+
+
+def test_the_scroll_area_never_scrolls_horizontally(dialog: SettingsDialog) -> None:
+    """Left on the default policy, the first layout pass -- before the
+    vertical scrollbar's width comes out of the viewport -- makes the
+    content momentarily too wide, and a horizontal scrollbar appears for
+    exactly one frame before vanishing. Nothing here is ever meant to
+    scroll sideways, so the bar is switched off outright (the same
+    reasoning, and the same fix, as `TagPanel` and the result list)."""
+    scroll = dialog.shortcuts_panel.findChild(QScrollArea, "settingsScroll")
+    assert scroll is not None
+    assert scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+
+def test_a_parented_dialog_positions_itself_before_it_is_shown(
+    qtbot: QtBot, bindings: ShortcutBindings
+) -> None:
+    """`QDialog::adjustPosition()` only runs while `Qt::WA_Moved` is
+    unset, and it runs twice -- once before the window is mapped, when
+    the frame margins read as zero, and again once they're real. The
+    dialog therefore appeared and *then* jumped by the size of its own
+    title bar. Positioning it ourselves up front sets WA_Moved, which is
+    what stops the second pass; this asserts the flag rather than the
+    coordinates, since the exact centre is the window manager's business
+    and varies by screen."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    parent.resize(1200, 800)
+    parent.show()
+    qtbot.waitExposed(parent)
+
+    child = SettingsDialog(bindings, parent)
+    qtbot.addWidget(child)
+
+    assert child.testAttribute(Qt.WidgetAttribute.WA_Moved)
+
+    before = child.pos()
+    child.show()
+    qtbot.waitExposed(child)
+
+    assert child.pos() == before  # nothing repositioned it on the way up
+
+
+def test_a_parentless_dialog_is_left_to_the_platform(dialog: SettingsDialog) -> None:
+    """The `dialog` fixture builds one with no parent -- there's nothing
+    to centre on, so placing it stays the window manager's job."""
+    assert not dialog.testAttribute(Qt.WidgetAttribute.WA_Moved)

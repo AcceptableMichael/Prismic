@@ -341,3 +341,80 @@ style's arrow**, and Qt's QSS box model does *not* reproduce the CSS
 zero-size-plus-transparent-borders triangle normally used to replace it
 — it draws a solid bar instead. Leave both `::drop-down` and
 `::down-arrow` unstyled if you want an arrow.
+
+## 2026-09-20: a one-frame flash, and how to find one
+
+The human reported "a very brief flash when opening settings" and noted
+it was too fast to see without recording. Screen recording wasn't
+needed, and wouldn't have explained it anyway — **the way to diagnose a
+flash is to log the window's own events and grab its first frames**,
+then diff them. A throwaway script that installs an event filter on the
+dialog, prints `geometry()` for every Show/Move/Resize/Paint, and calls
+`grab().save()` after `show()` and again after each `processEvents()`
+localized both causes in one run. Keep that pattern in mind: a flash is
+just a frame that differs from the settled one, and both the geometry
+and the pixels are inspectable without a camera.
+
+Two independent causes, both fixed in `ui/settings_dialog.py`:
+
+1. **`QDialog::adjustPosition()` runs twice and the second pass is
+   visible.** It only runs while `Qt::WA_Moved` is unset, and it
+   positions the dialog once *before* the native window is mapped —
+   when the frame margins read as zero — and again once they're real.
+   The event log showed a `Move` of (-10, -10) arriving *after* `Show`,
+   with the first `Paint` only after that: the window appeared, then
+   jumped by its own title bar. The fix is to position it ourselves in
+   `__init__`, since calling `move()` at all sets WA_Moved and
+   suppresses Qt's version entirely. To place it as well as Qt would
+   have, call `create()` first: that builds the native window without
+   showing it, which is the point where `windowHandle().frameMargins()`
+   becomes real (0/30/0/0 on Windows 11), so the *frame* can be centred
+   rather than the client area. Any dialog this app adds later wants
+   the same treatment.
+2. **A horizontal scrollbar appearing for exactly one frame.** On the
+   first layout pass, before the vertical scrollbar's width has come out
+   of the viewport, a `QScrollArea`'s content is momentarily too wide;
+   the bar appears and then vanishes. `TagPanel` and the result list
+   already set `ScrollBarAlwaysOff` for the same underlying reason ("Qt
+   reacting to a sub-pixel width miscalculation, not anything actually
+   cut off") — that comment turns out to describe a *visible* artifact,
+   not just a cosmetic one, and the settings scroll area now does the
+   same.
+
+Both are covered by tests that assert the mechanism (the scrollbar
+policy; `WA_Moved` plus an unchanged position across `show()`) rather
+than pixel coordinates, which vary by screen.
+
+Unrelated defect found while chasing this: `KeyCaptureButton` called
+`grabKeyboard()` and only released it on focus-out, so **closing the
+Settings window mid-capture could leave an application-wide keyboard
+grab held by a hidden widget** — every keystroke in the app going to an
+invisible button. Now released in `hideEvent` too.
+
+### Still open: an intermittent hard crash in the test suite
+
+A full `pytest` run has twice ended in a `Windows fatal exception`
+faulthandler dump whose frames are all pytest internals (no test frame),
+i.e. a fault in C code between tests rather than in any test's Python.
+Both times every test had already passed. It has **not** reproduced in
+~20 subsequent full runs, randomized and fixed-order, so it wasn't
+bisected to a cause and it is **not** known to be related to the
+Settings work. Recording it here so the next session doesn't rediscover
+it cold.
+
+An attempt to attribute it against the pre-Settings commit (`4aac524`,
+via `git worktree`) was made and **produced nothing usable** — worth
+knowing so it isn't repeated the same way. Two problems: running
+`uv run --project <main repo> pytest` from inside the worktree resolves
+the *package* to the main repo's `src/`, so it tested new source against
+old tests (the 3 failures were exactly the 3 renamed
+`tag_id_for_shortcut` call sites, not a real signal); a worktree needs
+its own `uv sync` and a plain `uv run pytest` to be a real baseline. And
+more fundamentally, at an observed rate of roughly 2 occurrences in ~25
+runs, six clean baseline runs wouldn't have distinguished "absent" from
+"didn't happen to fire" anyway. If it resurfaces, catch the dump itself
+(the top of the traceback, which run, and whether `-p no:randomly` was
+on) rather than trying to prove a negative by repetition. The most likely suspects, untested: Qt
+teardown of a widget that still holds a grab (the `grabKeyboard` issue
+above is now fixed, which may or may not have been it), or QtMultimedia
+/ffmpeg teardown in the viewer tests.

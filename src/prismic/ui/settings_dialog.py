@@ -19,8 +19,8 @@ new keys to the live UI.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QFocusEvent, QKeyEvent
+from PySide6.QtCore import QEvent, QMargins, QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtGui import QFocusEvent, QHideEvent, QKeyEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -136,6 +136,18 @@ class KeyCaptureButton(QPushButton):
         # leaving an invisible one armed on an unfocused widget.
         self._stop_capturing()
         super().focusOutEvent(event)
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        # `grabKeyboard()` is an application-wide grab: while it's held,
+        # every key event in the process comes here regardless of what
+        # the user thinks they're typing into. Losing focus is the usual
+        # way out (above), but closing the Settings window with a capture
+        # still armed doesn't necessarily deliver a focus-out first --
+        # and a grab held by a hidden, or since-destroyed, widget would
+        # take the keyboard away from the whole app with nothing on
+        # screen to explain why.
+        self._stop_capturing()
+        super().hideEvent(event)
 
     def event(self, event: QEvent) -> bool:
         if not self.is_capturing or not isinstance(event, QKeyEvent):
@@ -369,6 +381,18 @@ class ShortcutsPanel(QWidget):
         scroll.setObjectName("settingsScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # Never horizontal-scroll, for the same reason `TagPanel` and the
+        # result list don't: every row fits the viewport by construction
+        # (the descriptions wrap, the editors are fixed-width), so a
+        # horizontal scrollbar here is only ever Qt reacting to a
+        # transient width miscalculation, not to anything actually cut
+        # off. Left on the default policy it does exactly that -- on the
+        # first layout pass, before the vertical scrollbar's width has
+        # been taken out of the viewport, the content is momentarily too
+        # wide and a horizontal bar appears for one frame and then goes
+        # away again. That one frame is a visible flash when the window
+        # opens.
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(content)
 
         self._restore_button = QPushButton("Restore all defaults", self)
@@ -481,3 +505,60 @@ class SettingsDialog(QDialog):
         footer_widget.setObjectName("settingsFooter")
         footer_widget.setLayout(footer)
         layout.addWidget(footer_widget)
+
+        self._center_on_parent()
+
+    def _center_on_parent(self) -> None:
+        """Place the window over its parent before it is ever shown.
+
+        Not cosmetic bookkeeping -- this is what stops a visible flash on
+        open. Left to itself, `QDialog::adjustPosition()` runs *twice*:
+        once before the window is mapped, when the frame margins aren't
+        known yet and count as zero, and again once they are. So the
+        dialog appears at one position and then jumps by the size of its
+        own title bar and border, on the frame *after* it became visible.
+        Measured here as a (-10, -10) `Move` arriving after `Show`, with
+        the first `Paint` only afterwards.
+
+        Calling `move()` at all sets `Qt::WA_Moved`, which is the flag
+        `adjustPosition()` checks before doing anything -- so positioning
+        it once, ourselves, replaces the two-step entirely.
+
+        `create()` is what makes that a fair trade rather than swapping a
+        flash for a misplaced window: it builds the native window without
+        showing it, which is the point at which the frame margins become
+        real (0/30/0/0 on Windows 11 -- a title bar and no border). With
+        them in hand we can centre the *frame*, which is what Qt's second
+        pass was for, while still doing it entirely before the window is
+        on screen.
+        """
+        parent = self.parentWidget()
+        if parent is None:
+            return  # a parentless dialog is the platform's to place
+        self.create()
+        handle = self.windowHandle()
+        margins = handle.frameMargins() if handle is not None else QMargins()
+
+        frame = QRect(
+            QPoint(),
+            QSize(
+                self.width() + margins.left() + margins.right(),
+                self.height() + margins.top() + margins.bottom(),
+            ),
+        )
+        frame.moveCenter(parent.window().frameGeometry().center())
+
+        screen = parent.window().screen()
+        if screen is not None:
+            # The same clamp Qt applies, for when the main window is
+            # itself partly off-screen -- without it, centring on that
+            # window would put this one's title bar out of reach.
+            available = screen.availableGeometry()
+            frame.moveLeft(
+                max(available.left(), min(frame.left(), available.right() - frame.width()))
+            )
+            frame.moveTop(
+                max(available.top(), min(frame.top(), available.bottom() - frame.height()))
+            )
+
+        self.move(frame.left() + margins.left(), frame.top() + margins.top())
