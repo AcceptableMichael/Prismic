@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox, QScrollArea, QWidget
+from PySide6.QtWidgets import QLabel, QMessageBox, QScrollArea, QWidget
 from pytestqt.qtbot import QtBot
 
 from prismic.application.input import shortcuts
@@ -12,6 +12,7 @@ from prismic.ui.settings_dialog import (
     KeyCaptureButton,
     SettingsDialog,
     ShortcutRow,
+    SizeGrip,
     TapModifierCombo,
     binding_display,
 )
@@ -379,6 +380,53 @@ def test_the_dialog_reports_every_change_so_the_app_can_re_apply_it(
 def test_binding_display_spells_out_an_unbound_shortcut() -> None:
     assert binding_display("") == "Not set"
     assert binding_display("Ctrl+R") == "Ctrl + R"
+
+
+# -- Window chrome -----------------------------------------------------------
+# The window supplies its own, so the two jobs the native frame was
+# doing -- somewhere to grab it by, and a way to close it -- have to be
+# covered here instead.
+
+
+def test_the_window_has_no_native_frame(dialog: SettingsDialog) -> None:
+    assert dialog.windowFlags() & Qt.WindowType.FramelessWindowHint
+
+
+def test_the_title_bar_names_the_window(dialog: SettingsDialog) -> None:
+    """The native title bar showed `windowTitle()`; this one has to say
+    the same thing, since nothing else does now."""
+    label = dialog.title_bar.findChild(QLabel, "settingsTitle")
+    assert label is not None
+    assert label.text() == dialog.windowTitle() == "Settings"
+
+
+def test_the_title_bar_close_button_closes_the_window(qtbot: QtBot, dialog: SettingsDialog) -> None:
+    assert dialog.isVisible()
+
+    qtbot.mouseClick(dialog.title_bar.close_button, Qt.MouseButton.LeftButton)
+
+    assert not dialog.isVisible()
+
+
+def test_escape_still_closes_the_window(qtbot: QtBot, dialog: SettingsDialog) -> None:
+    """Losing the native frame must not leave the keyboard route out
+    depending on the mouse finding a 44px button."""
+    qtbot.keyClick(dialog, Qt.Key.Key_Escape)
+
+    assert not dialog.isVisible()
+
+
+def test_the_close_button_is_not_the_default_button(dialog: SettingsDialog) -> None:
+    """Return belongs to whatever the user is working in -- a title-bar
+    X that answers it would close the window out from under them."""
+    assert not dialog.title_bar.close_button.isDefault()
+    assert not dialog.title_bar.close_button.autoDefault()
+
+
+def test_the_window_can_still_be_resized(dialog: SettingsDialog) -> None:
+    """A frameless window loses the native resize borders with the rest
+    of the frame, and this list is long enough that height matters."""
+    assert dialog.findChild(SizeGrip) is not None
 
 
 # -- Opening without a flash ---------------------------------------------------

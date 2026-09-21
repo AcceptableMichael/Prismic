@@ -372,8 +372,50 @@ QMessageBox {{
    background and the border between the two, rather than the flat
    single-surface look the rest of the app uses. */
 
+/* The window is frameless, so this border is the only thing separating
+   it from whatever it's floating over -- without it a dark dialog on
+   the dark main window has no edge at all. */
 QDialog#settingsDialog {{
     background: {BG_APP};
+    border: 1px solid {BORDER};
+}}
+
+/* Stands in for the native title bar. Same surface as the sidebar
+   below it, so the top-left of the window reads as one panel rather
+   than two stacked strips. */
+QWidget#settingsTitleBar {{
+    background: {BG_PANEL};
+    border-bottom: 1px solid {BORDER_SUBTLE};
+    min-height: 34px;
+}}
+QLabel#settingsTitle {{
+    color: {TEXT_SECONDARY};
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}}
+
+/* Square, flush into the corner, and red on hover -- the one place in
+   this app that deliberately imitates a platform convention, because
+   "the X at the top right closes the window" is the only affordance
+   replacing the native frame. */
+QPushButton#windowCloseButton {{
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    color: {TEXT_SECONDARY};
+    font-size: 13px;
+    min-width: 44px;
+    min-height: 34px;
+    padding: 0;
+}}
+QPushButton#windowCloseButton:hover {{
+    background: {DANGER};
+    color: #17181c;
+}}
+QPushButton#windowCloseButton:pressed {{
+    background: {DANGER_MUTED};
+    color: {DANGER};
 }}
 QListWidget#settingsPanelList {{
     background: {BG_PANEL};
