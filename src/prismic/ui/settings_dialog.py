@@ -32,7 +32,6 @@ from PySide6.QtGui import (
     QResizeEvent,
 )
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -51,21 +50,20 @@ from PySide6.QtWidgets import (
 
 from prismic.application.input.shortcuts import (
     SHORTCUTS,
-    TAP_MODIFIER_CHOICES,
     ShortcutBindings,
     ShortcutDefinition,
-    ShortcutKind,
+    is_modifier_only,
     keycaps,
+    normalize,
 )
 from prismic.application.input.shortcuts import (
     definition as shortcut_definition,
 )
 from prismic.ui import theme
-from prismic.ui.keyboard import key_text
+from prismic.ui.keyboard import MODIFIER_KEY_NAMES, key_text
 
 _UNSET_TEXT = "Not set"
 _CAPTURING_TEXT = "Press a key…"
-_UNSET_CHOICE = "Not set"
 
 
 def binding_display(binding: str) -> str:
@@ -75,7 +73,13 @@ def binding_display(binding: str) -> str:
     the size these are rendered, an unspaced run of short tokens reads as
     one word. Built from `keycaps()` so it stays in step with how the
     hover-explainer bar splits the same string into boxes.
+
+    A bare modifier gets spelled out, because "Ctrl" on its own would
+    otherwise read as an unfinished combination rather than the tap
+    gesture it actually is.
     """
+    if is_modifier_only(binding):
+        return f"{normalize(binding)} (tapped alone)"
     caps = keycaps(binding)
     return " + ".join(caps) if caps else _UNSET_TEXT
 
@@ -92,6 +96,11 @@ class KeyCaptureButton(QPushButton):
     `QAction`'s shortcut is delivered here as an ordinary key press
     instead of firing that action.
 
+    A modifier tapped on its own is a binding too, not a half-finished
+    combination -- the release is what tells the two apart, so both are
+    handled here. Every shortcut accepts one; see
+    `shortcuts.is_modifier_only()` for what it then means.
+
     Escape is the one key that can't be bound this way, because it's the
     only way out of a capture the user didn't mean to start -- it cancels
     instead. That doesn't make Escape unbindable in general: it's the
@@ -107,6 +116,9 @@ class KeyCaptureButton(QPushButton):
         self.setCheckable(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._binding = ""
+        # A modifier that has gone down with nothing else since. Its
+        # release is what turns it into a binding -- see `event()`.
+        self._pending_modifier: int | None = None
         self.clicked.connect(self._on_clicked)
 
     @property
@@ -167,50 +179,43 @@ class KeyCaptureButton(QPushButton):
         if event.type() == QEvent.Type.ShortcutOverride:
             event.accept()
             return True
+        if event.type() == QEvent.Type.KeyRelease:
+            return self._handle_release(event)
         if event.type() != QEvent.Type.KeyPress:
             return super().event(event)
         if event.key() == Qt.Key.Key_Escape:
             self._stop_capturing()
             return True
+        if not event.isAutoRepeat():
+            if self._pending_modifier is not None:
+                # Something else went down while a modifier was held, so
+                # it's a combination now, not a tap.
+                self._pending_modifier = None
+            elif event.key() in MODIFIER_KEY_NAMES:
+                self._pending_modifier = event.key()
         captured = key_text(event)
         if captured is None:
-            # A bare modifier, held on its way to a real combination --
-            # keep waiting rather than treating it as the binding.
+            # A bare modifier. It could still become a combination (the
+            # user is mid-chord) or end as a tap -- its release decides.
             return True
+        self._pending_modifier = None
         self._stop_capturing()
         self.binding_captured.emit(captured)
         return True
 
-
-class TapModifierCombo(QComboBox):
-    """The editor for a `ShortcutKind.TAP_MODIFIER` shortcut.
-
-    A gesture like "tap Ctrl on its own" can't be captured the way a key
-    combination can -- pressing Ctrl in a capture box is indistinguishable
-    from starting to press Ctrl+something -- so it's picked from the short
-    list of modifiers that exist instead.
-    """
-
-    binding_chosen = Signal(str)
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("tapModifierCombo")
-        self.addItem(_UNSET_CHOICE, "")
-        for modifier in TAP_MODIFIER_CHOICES:
-            self.addItem(f"{modifier} (tapped alone)", modifier)
-        self.currentIndexChanged.connect(self._on_index_changed)
-
-    def set_binding(self, binding: str) -> None:
-        index = self.findData(binding)
-        if index < 0:
-            index = 0
-        self.blockSignals(True)
-        self.setCurrentIndex(index)
-        self.blockSignals(False)
-
-    def _on_index_changed(self, _index: int) -> None:
-        self.binding_chosen.emit(str(self.currentData()))
+    def _handle_release(self, event: QKeyEvent) -> bool:
+        """A modifier let go with nothing pressed since it went down is a
+        tap, and taps are bindable like any other input -- that's how the
+        Edit list's numbering swap gets its default of plain Ctrl. Every
+        other release is swallowed, since the press it belongs to was
+        already dealt with above."""
+        pending = self._pending_modifier
+        if pending is None or event.isAutoRepeat() or event.key() != pending:
+            return True
+        self._pending_modifier = None
+        self._stop_capturing()
+        self.binding_captured.emit(MODIFIER_KEY_NAMES[pending])
+        return True
 
 
 class ShortcutRow(QWidget):
@@ -247,15 +252,12 @@ class ShortcutRow(QWidget):
         text_column.addWidget(self._description)
         text_column.addWidget(self._conflict)
 
-        self._editor: KeyCaptureButton | TapModifierCombo
-        if definition.kind is ShortcutKind.TAP_MODIFIER:
-            combo = TapModifierCombo(self)
-            combo.binding_chosen.connect(self._assign)
-            self._editor = combo
-        else:
-            button = KeyCaptureButton(self)
-            button.binding_captured.connect(self._assign)
-            self._editor = button
+        # One editor for every shortcut, with no per-command variations:
+        # whether a binding turns out to be a key, a combination or a
+        # bare modifier tap is decided by what the user presses into it,
+        # not by anything the registry says about the command.
+        self._editor = KeyCaptureButton(self)
+        self._editor.binding_captured.connect(self._assign)
         self._editor.setFixedWidth(180)
 
         self._clear_button = QPushButton("Clear", self)

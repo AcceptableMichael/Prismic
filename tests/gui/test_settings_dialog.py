@@ -13,7 +13,6 @@ from prismic.ui.settings_dialog import (
     SettingsDialog,
     ShortcutRow,
     SizeGrip,
-    TapModifierCombo,
     binding_display,
 )
 
@@ -70,13 +69,19 @@ def test_each_row_shows_the_key_currently_bound(dialog: SettingsDialog) -> None:
     assert editor.text() == "Ctrl + Shift + O"
 
 
-def test_a_tap_modifier_shortcut_gets_a_chooser_not_a_capture_box(
-    dialog: SettingsDialog,
-) -> None:
-    """A tap-alone gesture can't be captured by pressing the modifier --
-    that's indistinguishable from starting Ctrl+something."""
-    assert isinstance(row_for(dialog, shortcuts.SWAP_TAG_NUMBERING)._editor, TapModifierCombo)
-    assert isinstance(row_for(dialog, shortcuts.RESCAN)._editor, KeyCaptureButton)
+def test_every_row_gets_the_same_editor(dialog: SettingsDialog) -> None:
+    """No per-command variations. What a binding turns out to be -- a
+    key, a combination, a bare modifier tap -- is decided by what the
+    user presses into the box, not by the registry."""
+    assert all(isinstance(row._editor, KeyCaptureButton) for row in dialog.shortcuts_panel.rows)
+
+
+def test_a_bare_modifier_binding_says_it_is_a_tap(dialog: SettingsDialog) -> None:
+    """ "Ctrl" alone would otherwise read as an unfinished combination."""
+    editor = row_for(dialog, shortcuts.SWAP_TAG_NUMBERING)._editor
+    assert isinstance(editor, KeyCaptureButton)
+
+    assert editor.text() == "Ctrl (tapped alone)"
 
 
 def test_an_unbound_shortcut_reads_as_not_set(
@@ -241,15 +246,60 @@ def test_capturing_space_binds_space_rather_than_re_pressing_the_button(
     assert bindings.binding(shortcuts.RESCAN) == "Space"
 
 
-def test_choosing_a_tap_modifier_rebinds_the_gesture(
-    dialog: SettingsDialog, bindings: ShortcutBindings
+def test_tapping_a_modifier_alone_binds_the_modifier(
+    qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
 ) -> None:
-    combo = row_for(dialog, shortcuts.SWAP_TAG_NUMBERING)._editor
-    assert isinstance(combo, TapModifierCombo)
+    """Pressed and released with nothing in between, a modifier is a
+    binding in its own right -- which is how the numbering swap gets its
+    default of plain Ctrl through the ordinary capture box."""
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
-    combo.setCurrentIndex(combo.findData("Alt"))
+    qtbot.keyPress(button, Qt.Key.Key_Alt)
+    qtbot.keyRelease(button, Qt.Key.Key_Alt)
 
-    assert bindings.binding(shortcuts.SWAP_TAG_NUMBERING) == "Alt"
+    assert bindings.binding(shortcuts.RESCAN) == "Alt"
+    assert not button.is_capturing
+
+
+def test_a_modifier_released_after_a_combination_is_not_a_tap(
+    qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
+) -> None:
+    """Ctrl+K is one binding, not Ctrl+K followed by a stray Ctrl tap --
+    the capture has to already be finished by the time Ctrl comes up."""
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    # Raw presses, in the order a real keyboard produces them. Passing
+    # `modifiers=` to qtbot instead would make QTest synthesize its own
+    # extra modifier press/release around the key, which is not what the
+    # widget sees from a physical keyboard and would be testing QTest.
+    qtbot.keyPress(button, Qt.Key.Key_Control)
+    qtbot.keyPress(button, Qt.Key.Key_K, Qt.KeyboardModifier.ControlModifier)
+    qtbot.keyRelease(button, Qt.Key.Key_K)
+    qtbot.keyRelease(button, Qt.Key.Key_Control)
+
+    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+K"
+
+
+def test_two_modifiers_held_together_are_not_a_tap(
+    qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
+) -> None:
+    """Ctrl held while Shift goes down isn't either one tapped alone, so
+    the box keeps waiting rather than guessing which was meant."""
+    button = row_for(dialog, shortcuts.RESCAN)._editor
+    assert isinstance(button, KeyCaptureButton)
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+
+    qtbot.keyPress(button, Qt.Key.Key_Control)
+    qtbot.keyPress(button, Qt.Key.Key_Shift)
+    qtbot.keyRelease(button, Qt.Key.Key_Shift)
+    qtbot.keyRelease(button, Qt.Key.Key_Control)
+
+    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"  # unchanged
+    assert button.is_capturing  # still waiting for something bindable
 
 
 # -- Clearing and resetting ------------------------------------------------------

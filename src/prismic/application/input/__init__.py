@@ -9,7 +9,6 @@ from prismic.application.input.shortcuts import (
     SHORTCUTS,
     ShortcutBindings,
     ShortcutDefinition,
-    ShortcutKind,
     ShortcutScope,
 )
 
@@ -22,6 +21,5 @@ __all__ = [
     "InputResolver",
     "ShortcutBindings",
     "ShortcutDefinition",
-    "ShortcutKind",
     "ShortcutScope",
 ]

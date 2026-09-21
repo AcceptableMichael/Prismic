@@ -56,7 +56,7 @@ from prismic.ui.hover_explainer_bar import HoverExplainerBar
 from prismic.ui.hover_hint import HoverHintController
 from prismic.ui.instance_bridge import InstanceBridge, request_focus
 from prismic.ui.keyboard import (
-    TAP_MODIFIER_KEYS,
+    MODIFIER_KEY_NAMES,
     KeyboardController,
     key_text,
     literal_character,
@@ -98,15 +98,20 @@ class MainWindow(QMainWindow):
         # Sticky last arrow-key direction, so preloading can bias further
         # ahead of travel than behind -- see _preload_neighbors().
         self._nav_direction = 1
-        # True from a press of whichever modifier the numbering-swap
-        # gesture is bound to, until either its own release (a "tap" --
-        # toggles _tag_shortcut_mode_action, see eventFilter) or any other
-        # key/mouse press invalidates it (held as a modifier for something
-        # else instead). `_tap_modifier_key` is that modifier's Qt key, or
-        # None when the gesture is unbound; both are set by
-        # `_apply_bindings()`.
-        self._tap_modifier_key: Qt.Key | None = None
-        self._tap_candidate = False
+        # Tap-gesture tracking, for shortcuts bound to a bare modifier
+        # (the Edit list's numbering swap, by default). `_keys_down` is
+        # every key currently held; `_tap_candidate_key` is a modifier
+        # that has been alone the whole time it's been down, and its own
+        # release fires whatever is bound to it.
+        #
+        # The set is doing real work, not bookkeeping: this filter is
+        # installed on the *application*, so it sees each key event more
+        # than once as Qt propagates it up the parent chain, and a plain
+        # "any other press cancels the tap" flag cancels itself on the
+        # second delivery of the very press that armed it. Adding to a
+        # set is idempotent, so re-deliveries are harmless.
+        self._keys_down: set[int] = set()
+        self._tap_candidate_key: int | None = None
         # See _stable_item_tags(): the item-tag panel's checked-group
         # ordering for whichever file is current, held stable across
         # add/remove until that file changes.
@@ -125,6 +130,7 @@ class MainWindow(QMainWindow):
             on_focus_item_tags=self.item_tag_panel.focus_search,
             on_toggle_tag_shortcut=self._on_toggle_tag_shortcut,
             on_toggle_focus_mode=self._toggle_focus_mode,
+            on_swap_tag_numbering=self._toggle_tag_shortcut_mode,
             parent=self,
         )
         self._apply_bindings()
@@ -369,13 +375,10 @@ class MainWindow(QMainWindow):
         )
         self.viewer.set_play_pause_shortcut(self._bindings.binding(shortcuts.VIEWER_PLAY_PAUSE))
         self.item_tag_panel.set_shortcut_labels(self._quick_select_labels())
-        self._tap_modifier_key = TAP_MODIFIER_KEYS.get(
-            self._bindings.binding(shortcuts.SWAP_TAG_NUMBERING)
-        )
-        # Whatever half-finished tap gesture was in flight was measured
-        # against the old modifier -- drop it rather than let it complete
-        # against the new one.
-        self._tap_candidate = False
+        # Whatever half-finished tap gesture was in flight was started
+        # under the old bindings -- drop it rather than let it complete
+        # against the new ones.
+        self._tap_candidate_key = None
 
     def _menu_text(self, label: str, shortcut_id: str) -> str:
         """`label`, plus the shortcut's key right-aligned after a literal
@@ -829,14 +832,14 @@ class MainWindow(QMainWindow):
             return super().eventFilter(watched, event)
         if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
             if not event.isAutoRepeat():
-                # Some other key going down while the tap modifier may or
-                # may not be held means a later release of it no longer
-                # counts as "tapped alone" -- it was held as a modifier for
-                # something else instead. Harmless no-op if it was never
-                # down to begin with.
-                self._tap_candidate = (
-                    self._tap_modifier_key is not None and event.key() == self._tap_modifier_key
-                )
+                self._keys_down.add(event.key())
+                if len(self._keys_down) > 1 or event.key() not in MODIFIER_KEY_NAMES:
+                    # Either something else is down too (so this modifier
+                    # is being held *for* that key, not tapped), or this
+                    # isn't a modifier at all.
+                    self._tap_candidate_key = None
+                elif self._tap_candidate_key is None:
+                    self._tap_candidate_key = event.key()
             pressed = key_text(event)
             if pressed is not None and self._handle_dismiss(pressed):
                 event.accept()
@@ -858,23 +861,63 @@ class MainWindow(QMainWindow):
                 event.accept()
                 return True
         elif event.type() == QEvent.Type.KeyRelease and isinstance(event, QKeyEvent):
-            if (
-                self._tap_modifier_key is not None
-                and event.key() == self._tap_modifier_key
-                and not event.isAutoRepeat()
-            ):
-                if self._tap_candidate:
-                    self._toggle_tag_shortcut_mode()
-                self._tap_candidate = False
+            if not event.isAutoRepeat():
+                self._keys_down.discard(event.key())
+                if self._tap_candidate_key == event.key():
+                    # Cleared before firing, so the same release arriving
+                    # again further up the propagation chain can't fire it
+                    # a second time.
+                    self._tap_candidate_key = None
+                    self._fire_tapped_modifier(MODIFIER_KEY_NAMES[event.key()])
             # Deliberately not consumed either way -- this is an
             # observation of the release, not a binding on it.
         elif event.type() == QEvent.Type.MouseButtonPress:
             # A modifier+click (of whatever kind, anywhere) is a held
             # modifier doing something else, same as a modifier+key combo
-            # above -- its eventual release shouldn't also toggle the tag
-            # numbering.
-            self._tap_candidate = False
+            # above -- its eventual release isn't a tap.
+            self._tap_candidate_key = None
+        elif event.type() == QEvent.Type.WindowDeactivate:
+            # Key releases that happen while another window has focus are
+            # never delivered here, so a key held across an alt-tab would
+            # otherwise stay in `_keys_down` forever and block every
+            # future tap. Nothing is held, as far as this window knows.
+            self._keys_down.clear()
+            self._tap_candidate_key = None
         return super().eventFilter(watched, event)
+
+    def _fire_tapped_modifier(self, modifier: str) -> None:
+        """Run whatever is bound to `modifier` on its own, if anything.
+
+        A bare modifier is a perfectly ordinary binding -- Settings
+        captures one the same way it captures any other key, and the Edit
+        list's numbering swap just happens to default to it. It can't be
+        dispatched through the normal key path, though: a lone modifier
+        has no key sequence (`key_text()` returns None for one), which is
+        why the gesture is recognized from the press/release pair here
+        instead."""
+        shortcut_id = self._bindings.shortcut_for(modifier)
+        if shortcut_id is not None:
+            self._fire_shortcut(shortcut_id)
+
+    def _fire_shortcut(self, shortcut_id: str) -> bool:
+        """Run a shortcut's command by id, with no key event behind it.
+
+        The commands live in three different places -- menu `QAction`s,
+        `KeyboardController`'s callbacks, and the handful handled here --
+        because each is dispatched differently during normal key
+        handling. Anything that arrives as an id rather than a key needs
+        one door into all of them, and this is it."""
+        action = self._shortcut_actions.get(shortcut_id)
+        if action is not None:
+            action.trigger()
+            return True
+        if shortcut_id == shortcuts.DISMISS:
+            return self._dismiss()
+        for slot in range(shortcuts.QUICK_SELECT_SLOT_COUNT):
+            if shortcut_id == shortcuts.quick_select_id(slot):
+                self._on_toggle_tag_shortcut(slot)
+                return True
+        return self.keyboard.run(shortcut_id)
 
     def _handle_dismiss(self, pressed: str) -> bool:
         """The Dismiss shortcut: leave a tag search box, and/or leave focus
@@ -886,12 +929,16 @@ class MainWindow(QMainWindow):
         unbinds both Dismiss and Focus Mode would otherwise have no way
         back out short of quitting the app."""
         dismiss = self._bindings.binding(shortcuts.DISMISS)
-        is_dismiss = bool(dismiss) and pressed == dismiss
-        if not is_dismiss:
-            if pressed == "Esc" and self._focus_mode_action.isChecked():
-                self._focus_mode_action.setChecked(False)
-                return True
-            return False
+        if bool(dismiss) and pressed == dismiss:
+            return self._dismiss()
+        if pressed == "Esc" and self._focus_mode_action.isChecked():
+            self._focus_mode_action.setChecked(False)
+            return True
+        return False
+
+    def _dismiss(self) -> bool:
+        """The Dismiss command itself, with no key behind it -- also what
+        `_fire_shortcut` runs when Dismiss is bound to a modifier tap."""
         handled = False
         if self._focus_is_text_editing():
             self._dismiss_typing_focus()

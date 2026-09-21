@@ -6,7 +6,6 @@ from prismic.application.input import shortcuts
 from prismic.application.input.shortcuts import (
     SHORTCUTS,
     ShortcutBindings,
-    ShortcutKind,
     ShortcutScope,
     keycaps,
 )
@@ -166,10 +165,36 @@ def test_conflicts_ignores_the_shortcut_being_asked_about(bindings: ShortcutBind
     assert bindings.conflicts(shortcuts.RESCAN, "Ctrl+R") == ()
 
 
-def test_the_swap_gesture_is_a_tap_modifier_not_a_key(bindings: ShortcutBindings) -> None:
-    definition = shortcuts.definition(shortcuts.SWAP_TAG_NUMBERING)
-    assert definition.kind is ShortcutKind.TAP_MODIFIER
-    assert definition.default in shortcuts.TAP_MODIFIER_CHOICES
+def test_a_bare_modifier_is_a_tap_gesture(bindings: ShortcutBindings) -> None:
+    """A modifier on its own can't be a key press -- holding Ctrl is how
+    half the other shortcuts start -- so a binding of just "Ctrl" means
+    the tap. The numbering swap defaults to one."""
+    assert shortcuts.is_modifier_only("Ctrl")
+    assert bindings.binding(shortcuts.SWAP_TAG_NUMBERING) == "Ctrl"
+
+
+def test_a_combination_is_not_a_tap_gesture() -> None:
+    assert not shortcuts.is_modifier_only("Ctrl+R")
+    assert not shortcuts.is_modifier_only("R")
+    assert not shortcuts.is_modifier_only("")
+
+
+def test_nothing_in_the_registry_restricts_which_shortcuts_can_be_tapped(
+    bindings: ShortcutBindings,
+) -> None:
+    """The gesture is a property of what the user bound, not of the
+    command -- so any shortcut takes a bare modifier, and it resolves
+    like any other binding."""
+    bindings.set_binding(shortcuts.RESCAN, "Alt")
+
+    assert bindings.shortcut_for("Alt") == shortcuts.RESCAN
+    assert shortcuts.is_modifier_only(bindings.binding(shortcuts.RESCAN))
+
+
+def test_a_modifier_binding_collides_with_another_like_any_other_key(
+    bindings: ShortcutBindings,
+) -> None:
+    assert bindings.conflicts(shortcuts.RESCAN, "Ctrl") == (shortcuts.SWAP_TAG_NUMBERING,)
 
 
 # -- Persistence ---------------------------------------------------------------

@@ -99,14 +99,18 @@ _SEQUENCE_MODIFIERS = (
     | Qt.KeyboardModifier.MetaModifier
 )
 
-TAP_MODIFIER_KEYS: dict[str, Qt.Key] = {
-    "Ctrl": Qt.Key.Key_Control,
-    "Alt": Qt.Key.Key_Alt,
-    "Shift": Qt.Key.Key_Shift,
-    "Meta": Qt.Key.Key_Meta,
+MODIFIER_KEY_NAMES: dict[int, str] = {
+    Qt.Key.Key_Control.value: "Ctrl",
+    Qt.Key.Key_Alt.value: "Alt",
+    Qt.Key.Key_Shift.value: "Shift",
+    Qt.Key.Key_Meta.value: "Meta",
 }
-"""The Qt key each `ShortcutKind.TAP_MODIFIER` binding names -- what
-`MainWindow.eventFilter` watches for a press/release pair on."""
+"""Qt key -> the name a bare-modifier binding uses for it.
+
+`key_text()` returns None for these, since a lone modifier has no key
+sequence. A shortcut bound to one fires on the press/release pair
+instead -- see `shortcuts.is_modifier_only()` and the tap tracking in
+`MainWindow.eventFilter`."""
 
 
 def key_text(event: QKeyEvent) -> str | None:
@@ -160,6 +164,7 @@ class KeyboardController(QObject):
         on_focus_item_tags: Callable[[], None],
         on_toggle_tag_shortcut: Callable[[int], None],
         on_toggle_focus_mode: Callable[[], None],
+        on_swap_tag_numbering: Callable[[], None],
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -173,6 +178,12 @@ class KeyboardController(QObject):
             shortcuts.NAVIGATE_NEXT_WHILE_TYPING: on_navigate_next,
             shortcuts.FOCUS_TAG_SEARCH: on_focus_item_tags,
             shortcuts.FOCUS_MODE: on_toggle_focus_mode,
+            # Registered here even though its default is a modifier tap,
+            # which this controller never sees: the binding is the user's
+            # to change, and on any ordinary key it has to dispatch like
+            # every other command. Leaving it out would make it the one
+            # shortcut that silently only works on a modifier.
+            shortcuts.SWAP_TAG_NUMBERING: on_swap_tag_numbering,
         }
         # Undo is the one global command with no entry in `SHORTCUTS`:
         # Ctrl+Z is a platform-level editing convention rather than an
@@ -183,6 +194,20 @@ class KeyboardController(QObject):
 
         self._resolver = InputResolver()
         self._resolver.register(InputContext.GLOBAL_COMMAND, self._handle_global_key)
+
+    def run(self, shortcut_id: str) -> bool:
+        """Run `shortcut_id`'s command directly, without a key event.
+
+        The route in for a shortcut the user bound to a bare modifier:
+        that gesture is recognized from a press/release pair in
+        `MainWindow.eventFilter`, which then has an id in hand rather
+        than a key to dispatch. Returns False for an id this controller
+        doesn't own, so the caller can try elsewhere."""
+        command = self._commands.get(shortcut_id)
+        if command is None:
+            return False
+        command()
+        return True
 
     def handle_key_press(self, event: QKeyEvent, *, text_editing: bool) -> bool:
         """Returns True if the event was consumed — the caller should

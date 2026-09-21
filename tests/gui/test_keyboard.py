@@ -606,6 +606,87 @@ def test_unbinding_the_numbering_swap_disables_the_gesture(
     assert window._tag_shortcut_mode_action.isChecked() is False
 
 
+def test_the_numbering_swap_works_on_an_ordinary_key_too(qtbot: QtBot, window: MainWindow) -> None:
+    """It's a regular input now -- bound to something that isn't a
+    modifier, it fires on the press like any other shortcut rather than
+    needing a tap-and-release."""
+    rebind(window, shortcuts.SWAP_TAG_NUMBERING, "F8")
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_F8)
+
+    assert window._tag_shortcut_mode_action.isChecked() is True
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_F8)
+
+    assert window._tag_shortcut_mode_action.isChecked() is False
+
+
+def test_any_shortcut_can_be_bound_to_a_modifier_tap(qtbot: QtBot, window: MainWindow) -> None:
+    """Nothing singles out which commands accept the tap gesture -- the
+    capture box takes one for every row, so dispatch has to honour it
+    for every command, or binding one would silently do nothing."""
+    session = window.session
+    assert session is not None
+    first_id, second_id = session.state.result_set
+    session.state.current_item = first_id
+    window._sync_result_selection()
+    rebind(window, shortcuts.SWAP_TAG_NUMBERING, "")  # free Ctrl up first
+    rebind(window, shortcuts.NAVIGATE_NEXT, "Ctrl")
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyPress(window.result_list, Qt.Key.Key_Control)
+    qtbot.keyRelease(window.result_list, Qt.Key.Key_Control)
+
+    assert session.state.current_item == second_id
+
+
+def test_a_menu_command_can_be_bound_to_a_modifier_tap(
+    qtbot: QtBot, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Menu commands run as QActions rather than through the keyboard
+    controller, so the tap dispatcher has to reach those too."""
+    opened: list[SettingsDialog] = []
+
+    def capture(dialog: SettingsDialog) -> int:
+        opened.append(dialog)
+        return 0
+
+    monkeypatch.setattr(SettingsDialog, "exec", capture)
+    rebind(window, shortcuts.SWAP_TAG_NUMBERING, "")
+    rebind(window, shortcuts.OPEN_SETTINGS, "Ctrl")
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyPress(window.result_list, Qt.Key.Key_Control)
+    qtbot.keyRelease(window.result_list, Qt.Key.Key_Control)
+
+    assert len(opened) == 1
+
+
+def test_a_quick_select_shortcut_can_be_bound_to_a_modifier_tap(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    current_id = session.state.result_set[0]
+    session.state.current_item = current_id
+    window._on_tag_create("a")
+    tag_id = window.item_tag_panel.model.tag_id_for_slot(0, selected=False)
+    assert tag_id is not None
+    rebind(window, shortcuts.SWAP_TAG_NUMBERING, "")
+    rebind(window, shortcuts.quick_select_id(0), "Ctrl")
+
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyPress(window.result_list, Qt.Key.Key_Control)
+    qtbot.keyRelease(window.result_list, Qt.Key.Key_Control)
+
+    assert [t.id for t in session.mappings.tags_for_media(current_id)] == [tag_id]
+
+
 def test_shortcuts_stand_down_while_a_modal_dialog_is_open(
     qtbot: QtBot, window: MainWindow
 ) -> None:

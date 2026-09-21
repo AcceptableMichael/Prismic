@@ -40,22 +40,29 @@ QUICK_SELECT_SLOT_COUNT = 10
 `ui/tag_model.py`, which assigns slots 0..N-1 by position."""
 
 
-class ShortcutKind(Enum):
-    KEY = auto()
-    """An ordinary key press, with or without modifiers."""
+MODIFIER_NAMES: tuple[str, ...] = ("Ctrl", "Alt", "Shift", "Meta")
+"""The modifiers, by the name Qt's portable key-sequence format uses.
 
-    TAP_MODIFIER = auto()
-    """A bare modifier pressed and released with nothing else in between.
+Two jobs: they're the prefixes `keycaps()` peels off a combination, and
+on their own they're a legitimate binding meaning "tapped alone" (see
+`is_modifier_only`).
+"""
 
-    Not expressible as a key sequence at all (there is no `QKeySequence`
-    for "Ctrl, alone, on release"), so its binding is just the modifier's
-    own name -- see `TAP_MODIFIER_CHOICES`. The gesture is recognized in
-    `MainWindow.eventFilter`, which is the only place that sees the
-    press/release pair it needs.
+
+def is_modifier_only(binding: str) -> bool:
+    """Whether `binding` is a bare modifier, i.e. a tap gesture.
+
+    A modifier on its own can't be a key *press* shortcut -- there's no
+    `QKeySequence` for "Ctrl, by itself", and holding Ctrl is how half
+    the other shortcuts start. So a binding of just "Ctrl" means the
+    modifier pressed and released with nothing else in between, which
+    `MainWindow.eventFilter` recognizes from the press/release pair.
+
+    Any shortcut may be bound this way; nothing about the registry
+    singles out which ones can. The gesture is a property of what the
+    user bound, not of the command.
     """
-
-
-TAP_MODIFIER_CHOICES: tuple[str, ...] = ("Ctrl", "Alt", "Shift", "Meta")
+    return normalize(binding) in MODIFIER_NAMES
 
 
 class ShortcutScope(Enum):
@@ -82,7 +89,6 @@ class ShortcutDefinition:
     label: str
     description: str
     default: str
-    kind: ShortcutKind = ShortcutKind.KEY
     scope: ShortcutScope = ShortcutScope.GLOBAL
 
 
@@ -181,10 +187,8 @@ SHORTCUTS: tuple[ShortcutDefinition, ...] = (
         id=SWAP_TAG_NUMBERING,
         category="View",
         label="Swap which tags are numbered",
-        description="Tapped alone, switches the Edit list's numbering between unselected "
-        "and selected tags",
+        description="Switch the Edit list's numbering between unselected and selected tags",
         default="Ctrl",
-        kind=ShortcutKind.TAP_MODIFIER,
     ),
     ShortcutDefinition(
         id=NAVIGATE_PREVIOUS,
@@ -272,7 +276,7 @@ def keycaps(binding: str) -> tuple[str, ...]:
     parts: list[str] = []
     remaining = binding
     while True:
-        for modifier in TAP_MODIFIER_CHOICES:
+        for modifier in MODIFIER_NAMES:
             if remaining.startswith(f"{modifier}+"):
                 parts.append(modifier)
                 remaining = remaining[len(modifier) + 1 :]
