@@ -65,10 +65,14 @@ These aren't a phase of their own — they apply throughout, per
 
 - Add/extend pytest-qt and unit tests alongside the code they cover, not as
   an afterthought.
-- Run `ruff check`, `ruff format`, `mypy` (strict) before considering a unit
-  of work done.
-- For anything UI-visible, verify with computer-use (see the launch-path note
-  in `project guidance.md`) in addition to automated tests.
+- Run `ruff check`, `ruff format`, `mypy` (strict) throughout — they're fast,
+  and they aren't one of the verification gates.
+- Clear all three verification gates before calling anything done: targeted
+  `pytest`, then computer-use on the running app, then the full `pytest`
+  suite. See [`testing flow.md`](../owned%20by%20human/testing%20flow.md).
+  (The computer-use gate has a launch-path note of its own in
+  `project guidance.md` — this app's window needs a particular launch to be
+  visible to it.)
 - Commit at each meaningful checkpoint with real messages.
 - Update this roadmap and the relevant phase file as scope shifts — don't let
   them drift from what's actually true.

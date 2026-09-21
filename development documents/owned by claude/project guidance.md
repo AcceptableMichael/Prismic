@@ -112,16 +112,27 @@ Unless told otherwise, when given a goal:
    permission at each step — pause only for genuinely ambiguous product/design
    decisions, or before anything destructive/irreversible/shared (see git
    rules above).
-2. **Verify your own work before calling it done.** Prefer, in order:
-   automated checks (`pytest`, `ruff`, `mypy`) for correctness; then actually
-   running the app and exercising the feature you built.
-3. For UI/UX changes, launch the app (`uv run prismic`) and use computer-use
-   to look at it — take a screenshot, interact with the relevant controls
-   (click, type, navigate), confirm it behaves and looks right, not just that
-   it launches without a traceback.
-4. If verification surfaces a bug or a rough edge, fix it and re-verify.
-   Loop this (implement -> run checks -> observe via computer-use -> fix)
-   until the goal is actually met, not just attempted once.
+2. **Verify your own work before calling it done**, through the three gates
+   in [`testing flow.md`](../owned%20by%20human/testing%20flow.md), in order:
+   targeted `pytest` for what you built, then computer-use on the running
+   app, then the full `pytest` suite. All three are required — a task isn't
+   complete with any of them skipped. `ruff` and `mypy` aren't gates; they're
+   fast, so run them throughout rather than saving them up.
+3. Gate 2 in practice: launch the app (`uv run prismic`, see the launch-path
+   notes below) and use computer-use to look at it — take a screenshot,
+   interact with the relevant controls (click, type, navigate), confirm it
+   behaves and looks right, not just that it launches without a traceback.
+   When computer-use can't see the window (it has masked this app's process
+   before, see the 2026-09-20 note), driving the real widgets from a
+   throwaway script and calling `QWidget.grab()` satisfies this gate too —
+   what matters is that the real thing was exercised and observed, not which
+   tool did the observing.
+4. If a gate surfaces a bug or a rough edge, fix it and re-verify. Loop this
+   (implement -> targeted tests -> observe the real app -> fix) until the
+   goal is actually met, not just attempted once. The gates are an ordering,
+   not a one-way pipeline: coming back through step 1 after step 2 or 3
+   found something is the normal path, and the full suite still runs last on
+   the way out.
 5. Commit at each meaningful checkpoint along the way, not only at the end —
    if the loop gets interrupted, the history should show real progress.
 6. **After every change is done** (not just a UI/UX one -- any change,
