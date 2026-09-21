@@ -15,24 +15,18 @@ Purely presentational plus one piece of state (`ShortcutBindings`, which
 persists itself). Nothing here touches a collection, a session, or the
 database; `MainWindow` listens for `bindings_changed` and re-applies the
 new keys to the live UI.
+
+Frameless, like every dialog in the app -- see `frameless_dialog.py` for
+the shared window chrome (`FramelessDialog`, `TitleBar`) and for
+`MessageDialog`, the themed replacement for the confirmation prompts this
+window raises (`_confirm_conflicts`, `_restore_defaults`).
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QMargins, QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import (
-    QColor,
-    QFocusEvent,
-    QHideEvent,
-    QKeyEvent,
-    QMouseEvent,
-    QPainter,
-    QPaintEvent,
-    QPen,
-    QResizeEvent,
-)
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtGui import QFocusEvent, QHideEvent, QKeyEvent
 from PySide6.QtWidgets import (
-    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -41,7 +35,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSizeGrip,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -59,7 +52,7 @@ from prismic.application.input.shortcuts import (
 from prismic.application.input.shortcuts import (
     definition as shortcut_definition,
 )
-from prismic.ui import theme
+from prismic.ui.frameless_dialog import FramelessDialog, MessageDialog
 from prismic.ui.keyboard import MODIFIER_KEY_NAMES, key_text
 
 _UNSET_TEXT = "Not set"
@@ -329,13 +322,11 @@ class ShortcutRow(QWidget):
         if not conflicts:
             return True
         names = ", ".join(shortcut_definition(other).label for other in conflicts)
-        answer = QMessageBox.question(
+        answer = MessageDialog.question(
             self,
             "Shortcut already in use",
             f"{binding_display(binding)} is already bound to {names}.\n\n"
             f"Assign it to “{self.definition.label}” and clear the other?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return False
@@ -461,12 +452,8 @@ class ShortcutsPanel(QWidget):
             row.refresh()
 
     def _restore_defaults(self) -> None:
-        answer = QMessageBox.question(
-            self,
-            "Restore default shortcuts",
-            "Put every shortcut back to its default key?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+        answer = MessageDialog.question(
+            self, "Restore default shortcuts", "Put every shortcut back to its default key?"
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
@@ -474,111 +461,11 @@ class ShortcutsPanel(QWidget):
         self._on_row_changed()
 
 
-class TitleBar(QWidget):
-    """The window's own title strip, standing in for the native one.
-
-    The dialog is frameless (see `SettingsDialog`), so the two things a
-    title bar is actually load-bearing for have to be provided here:
-    somewhere to grab the window by, and a way to close it.
-
-    Dragging is handed to `QWindow::startSystemMove()` rather than
-    tracked by hand from mouse deltas. It asks the window manager to run
-    its own move loop, which is what keeps edge snapping, multi-monitor
-    boundaries and per-monitor DPI working -- all things a manual
-    "remember the press offset and call move()" implementation quietly
-    gets wrong, and which are the reason hand-rolled title bars tend to
-    feel slightly off.
-    """
-
-    close_requested = Signal()
-
-    def __init__(self, title: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("settingsTitleBar")
-
-        self._label = QLabel(title, self)
-        self._label.setObjectName("settingsTitle")
-
-        self.close_button = QPushButton("✕", self)
-        self.close_button.setObjectName("windowCloseButton")
-        # Never the dialog's default button: Return belongs to whatever
-        # the user is actually working in, not to closing the window.
-        self.close_button.setAutoDefault(False)
-        self.close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.close_button.clicked.connect(self.close_requested)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self._label)
-        layout.addStretch(1)
-        layout.addWidget(self.close_button)
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            handle = self.window().windowHandle()
-            if handle is not None and handle.startSystemMove():
-                event.accept()
-                return
-        super().mousePressEvent(event)
-
-    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        # Deliberately swallowed. On a native title bar a double-click
-        # maximizes, which for a fixed-purpose settings window is never
-        # what's wanted -- and without the native frame there'd be no
-        # obvious way back out of it.
-        event.accept()
-
-
-class SizeGrip(QSizeGrip):
-    """A resize corner that's actually visible.
-
-    `QSizeGrip` leaves its own painting to the platform style, and this
-    app's stylesheet sets a background on every `QWidget` -- which wins,
-    blanking the style's diagonal lines and leaving a working but
-    completely invisible handle. Drawing it here is the same approach
-    `TagRowDelegate` takes for its row icons: paint it rather than hope
-    the style survives the QSS.
-
-    Resizing itself is still `QSizeGrip`'s; only the pixels are ours.
-    """
-
-    _SIZE = 16
-
-    def __init__(self, parent: QWidget) -> None:
-        # Required, not optional, unlike the other widgets here:
-        # QSizeGrip resizes *its window*, so one without a parent has
-        # nothing to act on.
-        super().__init__(parent)
-        self.setFixedSize(self._SIZE, self._SIZE)
-
-    def paintEvent(self, event: QPaintEvent) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor(theme.TEXT_MUTED), 1.4))
-        # Three diagonals of increasing length toward the corner -- the
-        # conventional grip, so it needs no explaining.
-        for offset in (3, 7, 11):
-            painter.drawLine(
-                self._SIZE - 2, self._SIZE - offset, self._SIZE - offset, self._SIZE - 2
-            )
-
-
-class SettingsDialog(QDialog):
+class SettingsDialog(FramelessDialog):
     bindings_changed = Signal()
 
     def __init__(self, bindings: ShortcutBindings, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Settings")
-        self.setObjectName("settingsDialog")
-        self.setModal(True)
-        # No native title bar, icon or close button: this window is all
-        # app-themed surfaces, and a light OS frame around them read as
-        # a different program's window sitting on top. `TitleBar` below
-        # supplies what the native frame was actually for. Set before
-        # `_center_on_parent()` calls `create()`, since changing window
-        # flags after the native window exists destroys and recreates it.
-        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        super().__init__("Settings", parent, resizable=True)
         self.resize(760, 620)
 
         self.shortcuts_panel = ShortcutsPanel(bindings, self)
@@ -595,7 +482,6 @@ class SettingsDialog(QDialog):
         self._stack.addWidget(self.shortcuts_panel)
         self.panel_list.currentRowChanged.connect(self._stack.setCurrentIndex)
 
-        self.title_bar = TitleBar("Settings", self)
         self.title_bar.close_requested.connect(self.accept)
 
         close_button = QPushButton("Close", self)
@@ -621,75 +507,4 @@ class SettingsDialog(QDialog):
         footer_widget.setLayout(footer)
         layout.addWidget(footer_widget)
 
-        # Frameless windows lose the native resize borders along with the
-        # rest of the frame, and this list is long enough that being able
-        # to make the window taller genuinely matters. Parented to the
-        # dialog and positioned in `resizeEvent` rather than put in the
-        # footer layout, so it sits flush in the corner the way a resize
-        # handle is expected to -- inside the footer it would be inset by
-        # that widget's padding, floating oddly short of the edge.
-        self._size_grip = SizeGrip(self)
-
         self._center_on_parent()
-
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        grip = self._size_grip
-        # One pixel in from each edge, clearing the window's own border.
-        grip.move(self.width() - grip.width() - 1, self.height() - grip.height() - 1)
-        grip.raise_()
-
-    def _center_on_parent(self) -> None:
-        """Place the window over its parent before it is ever shown.
-
-        Not cosmetic bookkeeping -- this is what stops a visible flash on
-        open. Left to itself, `QDialog::adjustPosition()` runs *twice*:
-        once before the window is mapped, when the frame margins aren't
-        known yet and count as zero, and again once they are. So the
-        dialog appears at one position and then jumps by the size of its
-        own title bar and border, on the frame *after* it became visible.
-        Measured here as a (-10, -10) `Move` arriving after `Show`, with
-        the first `Paint` only afterwards.
-
-        Calling `move()` at all sets `Qt::WA_Moved`, which is the flag
-        `adjustPosition()` checks before doing anything -- so positioning
-        it once, ourselves, replaces the two-step entirely.
-
-        `create()` is what makes that a fair trade rather than swapping a
-        flash for a misplaced window: it builds the native window without
-        showing it, which is the point at which the frame margins become
-        real (0/30/0/0 on Windows 11 -- a title bar and no border). With
-        them in hand we can centre the *frame*, which is what Qt's second
-        pass was for, while still doing it entirely before the window is
-        on screen.
-        """
-        parent = self.parentWidget()
-        if parent is None:
-            return  # a parentless dialog is the platform's to place
-        self.create()
-        handle = self.windowHandle()
-        margins = handle.frameMargins() if handle is not None else QMargins()
-
-        frame = QRect(
-            QPoint(),
-            QSize(
-                self.width() + margins.left() + margins.right(),
-                self.height() + margins.top() + margins.bottom(),
-            ),
-        )
-        frame.moveCenter(parent.window().frameGeometry().center())
-
-        screen = parent.window().screen()
-        if screen is not None:
-            # The same clamp Qt applies, for when the main window is
-            # itself partly off-screen -- without it, centring on that
-            # window would put this one's title bar out of reach.
-            available = screen.availableGeometry()
-            frame.moveLeft(
-                max(available.left(), min(frame.left(), available.right() - frame.width()))
-            )
-            frame.moveTop(
-                max(available.top(), min(frame.top(), available.bottom() - frame.height()))
-            )
-
-        self.move(frame.left() + margins.left(), frame.top() + margins.top())

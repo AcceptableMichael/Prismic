@@ -362,33 +362,31 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
     width: 0;
 }}
 
-QMessageBox {{
-    background: {BG_PANEL};
-}}
+/* -- Frameless dialog chrome ---------------------------------------------
+   Shared by every custom dialog (Settings, MessageDialog's confirmations
+   and error prompts) -- see frameless_dialog.py. None of these carry a
+   native title bar/icon/X, because a light OS frame around an otherwise
+   fully app-themed window reads as a different program's window sitting
+   on top of this one. */
 
-/* -- Settings window ----------------------------------------------------
-   The sidebar reads as a distinct surface from the panel it's selecting,
-   which is the whole point of splitting them -- hence the raised panel
-   background and the border between the two, rather than the flat
-   single-surface look the rest of the app uses. */
-
-/* The window is frameless, so this border is the only thing separating
-   it from whatever it's floating over -- without it a dark dialog on
-   the dark main window has no edge at all. */
-QDialog#settingsDialog {{
+/* Frameless, so this border is the only thing separating the dialog from
+   whatever it's floating over -- without it a dark dialog on the dark
+   main window would have no edge at all. */
+QDialog#appDialog {{
     background: {BG_APP};
     border: 1px solid {BORDER};
 }}
 
-/* Stands in for the native title bar. Same surface as the sidebar
-   below it, so the top-left of the window reads as one panel rather
-   than two stacked strips. */
-QWidget#settingsTitleBar {{
+/* Stands in for the native title bar. Same surface as the Settings
+   sidebar, so a window that has one reads as a single panel at the top
+   rather than two stacked strips; for a plain message dialog it's just
+   the header. */
+QWidget#dialogTitleBar {{
     background: {BG_PANEL};
     border-bottom: 1px solid {BORDER_SUBTLE};
     min-height: 34px;
 }}
-QLabel#settingsTitle {{
+QLabel#dialogTitle {{
     color: {TEXT_SECONDARY};
     font-size: 12px;
     font-weight: 600;
@@ -417,6 +415,32 @@ QPushButton#windowCloseButton:pressed {{
     background: {DANGER_MUTED};
     color: {DANGER};
 }}
+
+/* -- MessageDialog --------------------------------------------------------
+   The themed replacement for QMessageBox.question/warning/critical --
+   see frameless_dialog.py for why a real QMessageBox couldn't be reused
+   as-is. */
+QLabel#messageDialogText {{
+    color: {TEXT_PRIMARY};
+    font-size: 12px;
+}}
+/* A border, not a filled accent: this marks "what Enter does," not "the
+   recommended choice" -- the two aren't the same thing when the default
+   is Cancel, which it is for every confirmation this dialog raises. */
+QPushButton#messageDialogDefaultButton {{
+    border-color: {ACCENT_HOVER};
+}}
+QPushButton#messageDialogDefaultButton:hover {{
+    border-color: {ACCENT_HOVER};
+    background: {HOVER_WASH};
+}}
+
+/* -- Settings window ----------------------------------------------------
+   The sidebar reads as a distinct surface from the panel it's selecting,
+   which is the whole point of splitting them -- hence the raised panel
+   background and the border between the two, rather than the flat
+   single-surface look the rest of the app uses. */
+
 QListWidget#settingsPanelList {{
     background: {BG_PANEL};
     border: none;

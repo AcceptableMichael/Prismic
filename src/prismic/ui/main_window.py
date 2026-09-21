@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
     QListView,
     QMainWindow,
     QMenu,
-    QMessageBox,
     QSplitter,
     QStackedWidget,
 )
@@ -51,6 +50,7 @@ from prismic.application.session import PrismicSession
 from prismic.domain.tag import Tag
 from prismic.indexing.reconciler import ReconciliationResult
 from prismic.persistence.errors import CollectionLockedError, PersistenceError
+from prismic.ui.frameless_dialog import MessageDialog
 from prismic.ui.future_watcher import FutureWatcher
 from prismic.ui.hover_explainer_bar import HoverExplainerBar
 from prismic.ui.hover_hint import HoverHintController
@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
             # right here: the caller (bootstrap.run()) calls `.show()`
             # immediately after constructing this window, before starting
             # the event loop -- opening synchronously in __init__ meant a
-            # "collection already open elsewhere" QMessageBox could pop up
+            # "collection already open elsewhere" message dialog could pop up
             # against a window that was never actually shown yet, then an
             # empty placeholder window would appear only *after* the
             # dialog was dismissed. A zero-delay QTimer runs after `.show()`
@@ -443,11 +443,11 @@ class MainWindow(QMainWindow):
                     5000,
                 )
             else:
-                QMessageBox.critical(self, "Could not open collection", str(exc))
+                MessageDialog.critical(self, "Could not open collection", str(exc))
             self._central_stack.setCurrentWidget(self._placeholder)
             return
         except PersistenceError as exc:
-            QMessageBox.critical(self, "Could not open collection", str(exc))
+            MessageDialog.critical(self, "Could not open collection", str(exc))
             self._central_stack.setCurrentWidget(self._placeholder)
             return
 
@@ -674,7 +674,7 @@ class MainWindow(QMainWindow):
         try:
             self.session.execute(TagCreateCommand(name=name))
         except Exception as exc:  # noqa: BLE001 - shown to the user, not swallowed
-            QMessageBox.warning(self, "Could not create tag", str(exc))
+            MessageDialog.warning(self, "Could not create tag", str(exc))
         self._refresh_all()
 
     def _on_tag_rename(self, tag_id: int, new_name: str) -> None:
@@ -683,7 +683,7 @@ class MainWindow(QMainWindow):
         try:
             self.session.execute(TagRenameCommand(tag_id=tag_id, new_name=new_name))
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "Could not rename tag", str(exc))
+            MessageDialog.warning(self, "Could not rename tag", str(exc))
         self._refresh_all()
 
     def _on_tag_delete(self, tag_id: int) -> None:

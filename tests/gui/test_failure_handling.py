@@ -22,7 +22,7 @@ def window(qtbot: QtBot) -> MainWindow:
 def _patch_critical(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     shown: list[str] = []
     monkeypatch.setattr(
-        "prismic.ui.main_window.QMessageBox.critical",
+        "prismic.ui.main_window.MessageDialog.critical",
         lambda *args, **kwargs: shown.append(args[-1]),
     )
     return shown

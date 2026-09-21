@@ -8,11 +8,11 @@ from pytestqt.qtbot import QtBot
 from prismic.application.input import shortcuts
 from prismic.application.input.shortcuts import SHORTCUTS, ShortcutBindings
 from prismic.persistence.preferences import PreferencesStore
+from prismic.ui.frameless_dialog import MessageDialog, SizeGrip
 from prismic.ui.settings_dialog import (
     KeyCaptureButton,
     SettingsDialog,
     ShortcutRow,
-    SizeGrip,
     binding_display,
 )
 
@@ -42,7 +42,7 @@ def accept_all(monkeypatch: pytest.MonkeyPatch) -> None:
     """Answer Yes to every confirmation the dialog raises, so a test can
     drive a flow that passes through one without blocking on it."""
     monkeypatch.setattr(
-        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes
+        MessageDialog, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes
     )
 
 
@@ -379,7 +379,7 @@ def test_declining_the_conflict_leaves_both_shortcuts_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Cancel
+        MessageDialog, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Cancel
     )
     button = row_for(dialog, shortcuts.RESCAN)._editor
     assert isinstance(button, KeyCaptureButton)
@@ -445,7 +445,7 @@ def test_the_window_has_no_native_frame(dialog: SettingsDialog) -> None:
 def test_the_title_bar_names_the_window(dialog: SettingsDialog) -> None:
     """The native title bar showed `windowTitle()`; this one has to say
     the same thing, since nothing else does now."""
-    label = dialog.title_bar.findChild(QLabel, "settingsTitle")
+    label = dialog.title_bar.findChild(QLabel, "dialogTitle")
     assert label is not None
     assert label.text() == dialog.windowTitle() == "Settings"
 

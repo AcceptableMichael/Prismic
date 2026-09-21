@@ -44,7 +44,7 @@ def test_initial_path_failure_still_shows_the_error_after_construction(
 
     shown_messages: list[str] = []
     monkeypatch.setattr(
-        "prismic.ui.main_window.QMessageBox.critical",
+        "prismic.ui.main_window.MessageDialog.critical",
         lambda *args, **kwargs: shown_messages.append(args[-1]),
     )
 
@@ -81,7 +81,7 @@ def test_opening_a_bad_collection_shows_an_error_not_a_crash(
 
     shown_messages: list[str] = []
     monkeypatch.setattr(
-        "prismic.ui.main_window.QMessageBox.critical",
+        "prismic.ui.main_window.MessageDialog.critical",
         lambda *args, **kwargs: shown_messages.append(args[-1]),
     )
 
