@@ -73,6 +73,17 @@ def test_quick_select_defaults_are_the_digit_row(bindings: ShortcutBindings) -> 
     assert bindings.quick_select_slot("Ctrl+1") is None
 
 
+def test_a_quick_select_description_names_its_own_ctrl_escape_hatch() -> None:
+    """Ctrl+<the same key> types the character instead of toggling, while
+    a tag search box has focus (see `MainWindow._handle_quick_select_while_
+    typing`) -- easy to miss since it isn't a separate, independently
+    bindable shortcut of its own. Settings is the one place that could
+    say so, so the description has to actually say it."""
+    for slot in range(shortcuts.QUICK_SELECT_SLOT_COUNT):
+        description = shortcuts.definition(shortcuts.quick_select_id(slot)).description
+        assert "Ctrl" in description, shortcuts.quick_select_id(slot)
+
+
 # -- keycaps ------------------------------------------------------------------
 
 

@@ -134,7 +134,8 @@ def _quick_select_definitions() -> Iterator[ShortcutDefinition]:
             label=f"Toggle numbered tag {slot + 1}",
             description=(
                 f"Toggle whichever tag the Edit list currently numbers {slot + 1} "
-                "on the file being viewed"
+                "on the file being viewed. Still works while a tag search box has "
+                "focus -- hold Ctrl to type the key there instead"
             ),
             default=_QUICK_SELECT_DEFAULTS[slot],
         )
