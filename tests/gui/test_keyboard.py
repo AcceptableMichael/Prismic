@@ -559,6 +559,66 @@ def test_a_rebound_quick_select_key_is_still_typeable_with_ctrl(
     assert session.mappings.tags_for_media(session.state.current_item) == []
 
 
+def test_rebinding_the_type_literally_modifier_moves_the_escape_hatch(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    """The modifier itself is configurable, not fixed to Ctrl -- rebind it
+    and the escape hatch follows, for every quick-select slot at once."""
+    session = window.session
+    assert session is not None
+    session.state.current_item = session.state.result_set[0]
+    window._on_tag_create("a")
+    rebind(window, shortcuts.TYPE_LITERALLY_MODIFIER, "Alt")
+
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.item_tag_panel.search_box, Qt.Key.Key_1, Qt.KeyboardModifier.AltModifier)
+
+    assert window.item_tag_panel.search_box.text() == "1"
+    assert session.mappings.tags_for_media(session.state.current_item) == []
+
+
+def test_ctrl_no_longer_types_literally_once_the_modifier_is_rebound(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    session.state.current_item = session.state.result_set[0]
+    window._on_tag_create("a")
+    rebind(window, shortcuts.TYPE_LITERALLY_MODIFIER, "Alt")
+
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+    qtbot.keyClick(
+        window.item_tag_panel.search_box, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier
+    )
+
+    # Neither typed (Ctrl+1 no longer means "type literally") nor toggled
+    # (the search box, not the result list, has focus) -- Windows hands
+    # Qt an empty text() for Ctrl+digit, so this key now does nothing.
+    assert window.item_tag_panel.search_box.text() == ""
+    assert session.mappings.tags_for_media(session.state.current_item) == []
+
+
+def test_unbinding_the_type_literally_modifier_disables_the_escape_hatch(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    session.state.current_item = session.state.result_set[0]
+    window._on_tag_create("a")
+    rebind(window, shortcuts.TYPE_LITERALLY_MODIFIER, "")
+
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+    qtbot.keyClick(
+        window.item_tag_panel.search_box, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier
+    )
+
+    assert window.item_tag_panel.search_box.text() == ""
+    assert session.mappings.tags_for_media(session.state.current_item) == []
+
+
 def test_the_tag_rows_label_whichever_key_is_bound(window: MainWindow) -> None:
     window._on_tag_create("a")
     assert window._quick_select_labels()[0] == "1"

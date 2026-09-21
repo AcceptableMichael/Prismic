@@ -45,6 +45,7 @@ from prismic.application.input.shortcuts import (
     SHORTCUTS,
     ShortcutBindings,
     ShortcutDefinition,
+    ShortcutScope,
     is_modifier_only,
     keycaps,
     normalize,
@@ -59,7 +60,7 @@ _UNSET_TEXT = "Not set"
 _CAPTURING_TEXT = "Press a key…"
 
 
-def binding_display(binding: str) -> str:
+def binding_display(binding: str, *, held: bool = False) -> str:
     """A binding as one human-readable string ("Ctrl + Shift + O").
 
     Spaced around the separator rather than Qt's tight "Ctrl+Shift+O": at
@@ -68,11 +69,19 @@ def binding_display(binding: str) -> str:
     hover-explainer bar splits the same string into boxes.
 
     A bare modifier gets spelled out, because "Ctrl" on its own would
-    otherwise read as an unfinished combination rather than the tap
-    gesture it actually is.
+    otherwise read as an unfinished combination. Which gesture it's
+    spelled out *as* isn't a property of the binding string alone,
+    though: for almost every shortcut a lone modifier means "tapped
+    alone, then released" (see `shortcuts.is_modifier_only()`), but for a
+    `ShortcutScope.MODIFIER` entry (`TYPE_LITERALLY_MODIFIER` today) it
+    means "held down while some other key is pressed" instead -- a
+    genuinely different gesture on the same physical key. `held` is the
+    caller's way of saying which one applies to the shortcut this binding
+    belongs to.
     """
     if is_modifier_only(binding):
-        return f"{normalize(binding)} (tapped alone)"
+        gesture = "held" if held else "tapped alone"
+        return f"{normalize(binding)} ({gesture})"
     caps = keycaps(binding)
     return " + ".join(caps) if caps else _UNSET_TEXT
 
@@ -92,7 +101,8 @@ class KeyCaptureButton(QPushButton):
     A modifier tapped on its own is a binding too, not a half-finished
     combination -- the release is what tells the two apart, so both are
     handled here. Every shortcut accepts one; see
-    `shortcuts.is_modifier_only()` for what it then means.
+    `shortcuts.is_modifier_only()` for what it then means, and `held`
+    below for the one case where it means something other than a tap.
 
     Escape is the one key that can't be bound this way, because it's the
     only way out of a capture the user didn't mean to start -- it cancels
@@ -103,12 +113,18 @@ class KeyCaptureButton(QPushButton):
 
     binding_captured = Signal(str)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, held: bool = False) -> None:
         super().__init__(parent)
         self.setObjectName("shortcutCaptureButton")
         self.setCheckable(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._binding = ""
+        # Whether a bare-modifier binding on *this* shortcut means "held
+        # down for another key" rather than "tapped alone" -- purely a
+        # display concern, passed straight to `binding_display()`. See
+        # that function's own docstring for why this isn't something the
+        # binding string alone can say.
+        self._held = held
         # A modifier that has gone down with nothing else since. Its
         # release is what turns it into a binding -- see `event()`.
         self._pending_modifier: int | None = None
@@ -126,7 +142,7 @@ class KeyCaptureButton(QPushButton):
         if self.is_capturing:
             self.setText(_CAPTURING_TEXT)
         else:
-            self.setText(binding_display(self._binding))
+            self.setText(binding_display(self._binding, held=self._held))
         # Styled from the property rather than an inline stylesheet, so
         # the whole look stays in theme.py with everything else.
         self.setProperty("unset", not self._binding and not self.is_capturing)
@@ -227,6 +243,11 @@ class ShortcutRow(QWidget):
         self.setObjectName("shortcutRow")
         self.definition = definition
         self._bindings = bindings
+        # See `binding_display()`: a bare modifier means something
+        # different for this one scope than it does for every other
+        # shortcut, and both the editor and the search haystack need to
+        # know which reading applies here.
+        self._held = definition.scope is ShortcutScope.MODIFIER
 
         self._label = QLabel(definition.label)
         self._label.setObjectName("shortcutLabel")
@@ -249,7 +270,7 @@ class ShortcutRow(QWidget):
         # whether a binding turns out to be a key, a combination or a
         # bare modifier tap is decided by what the user presses into it,
         # not by anything the registry says about the command.
-        self._editor = KeyCaptureButton(self)
+        self._editor = KeyCaptureButton(self, held=self._held)
         self._editor.binding_captured.connect(self._assign)
         self._editor.setFixedWidth(180)
 
@@ -282,7 +303,7 @@ class ShortcutRow(QWidget):
                 self.definition.label,
                 self.definition.description,
                 self.definition.category,
-                binding_display(self._bindings.binding(self.definition.id)),
+                binding_display(self._bindings.binding(self.definition.id), held=self._held),
             )
         ).lower()
         return query in haystack
@@ -325,7 +346,7 @@ class ShortcutRow(QWidget):
         answer = MessageDialog.question(
             self,
             "Shortcut already in use",
-            f"{binding_display(binding)} is already bound to {names}.\n\n"
+            f"{binding_display(binding, held=self._held)} is already bound to {names}.\n\n"
             f"Assign it to “{self.definition.label}” and clear the other?",
         )
         if answer != QMessageBox.StandardButton.Yes:

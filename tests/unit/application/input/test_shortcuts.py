@@ -73,15 +73,44 @@ def test_quick_select_defaults_are_the_digit_row(bindings: ShortcutBindings) -> 
     assert bindings.quick_select_slot("Ctrl+1") is None
 
 
-def test_a_quick_select_description_names_its_own_ctrl_escape_hatch() -> None:
-    """Ctrl+<the same key> types the character instead of toggling, while
-    a tag search box has focus (see `MainWindow._handle_quick_select_while_
-    typing`) -- easy to miss since it isn't a separate, independently
-    bindable shortcut of its own. Settings is the one place that could
-    say so, so the description has to actually say it."""
-    for slot in range(shortcuts.QUICK_SELECT_SLOT_COUNT):
+def test_type_literally_modifier_is_its_own_configurable_shortcut(
+    bindings: ShortcutBindings,
+) -> None:
+    """Holding a modifier plus a quick-select key types the character
+    instead of toggling, while a tag search box has focus (see
+    `MainWindow._handle_quick_select_while_typing`) -- which modifier is
+    itself a shortcut, not a hard-coded "Ctrl", so rebinding it changes
+    the escape hatch for every quick-select slot at once."""
+    assert bindings.binding(shortcuts.TYPE_LITERALLY_MODIFIER) == "Ctrl"
+    assert bindings.literal_typing_modifier() == "Ctrl"
+
+    bindings.set_binding(shortcuts.TYPE_LITERALLY_MODIFIER, "Alt")
+
+    assert bindings.literal_typing_modifier() == "Alt"
+
+
+def test_the_type_literally_modifier_does_not_conflict_with_the_numbering_swap(
+    bindings: ShortcutBindings,
+) -> None:
+    """Both default to "Ctrl" -- one fires on tapping it alone, the other
+    only matters combined with some other key, so a user can have both on
+    Ctrl at once with neither ever getting in the other's way. Different
+    scopes are what keeps that from being reported as a conflict."""
+    assert bindings.conflicts(shortcuts.TYPE_LITERALLY_MODIFIER, "Ctrl") == ()
+    assert bindings.conflicts(shortcuts.SWAP_TAG_NUMBERING, "Ctrl") == ()
+
+
+def test_only_the_first_quick_select_description_explains_the_escape_hatch() -> None:
+    """Easy to miss since it isn't a separate, independently bindable
+    shortcut *per slot* -- Settings is the one place that could say so.
+    Repeating the same paragraph on all ten rows would just bury it."""
+    first = shortcuts.definition(shortcuts.quick_select_id(0)).description
+    assert "Type the key instead of toggling" in first
+
+    for slot in range(1, shortcuts.QUICK_SELECT_SLOT_COUNT):
         description = shortcuts.definition(shortcuts.quick_select_id(slot)).description
-        assert "Ctrl" in description, shortcuts.quick_select_id(slot)
+        assert "Type the key instead of toggling" not in description
+        assert "modifier" not in description.lower()
 
 
 # -- keycaps ------------------------------------------------------------------

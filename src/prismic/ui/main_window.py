@@ -60,7 +60,7 @@ from prismic.ui.keyboard import (
     KeyboardController,
     key_text,
     literal_character,
-    strip_control,
+    strip_modifier_prefix,
 )
 from prismic.ui.result_model import MediaIdRole, ResultListModel
 from prismic.ui.settings_dialog import SettingsDialog
@@ -954,22 +954,25 @@ class MainWindow(QMainWindow):
 
     def _handle_quick_select_while_typing(self, pressed: str) -> bool:
         """Quick-select tag shortcuts keep working while a text box has
-        focus -- and Ctrl+<the same key> types the character instead, so a
-        key spent on quick-select is still typeable.
+        focus -- and holding the "type literally" modifier
+        (`shortcuts.TYPE_LITERALLY_MODIFIER`, "Ctrl" by default, but its
+        own rebindable shortcut like everything else) plus the same key
+        types the character instead, so a key spent on quick-select is
+        still typeable.
 
         Both halves live here rather than in `KeyboardController` because
         the second one needs the actual focused widget, not just a key
-        string: letting a Ctrl+digit `QKeyEvent` fall through unhandled
-        does not, in practice, type anything, since Windows hands Qt an
-        empty `text()` for most Ctrl+digit combinations (confirmed
+        string: letting that `QKeyEvent` fall through unhandled does not,
+        in practice, type anything, since Windows hands Qt an empty
+        `text()` for most Ctrl+digit combinations (confirmed
         empirically). Without inserting it directly, spending a digit on
         quick-select would silently make it untypable in these fields even
-        with Ctrl held."""
+        with the modifier held."""
         slot = self._bindings.quick_select_slot(pressed)
         if slot is not None:
             self._on_toggle_tag_shortcut(slot)
             return True
-        base = strip_control(pressed)
+        base = strip_modifier_prefix(pressed, self._bindings.literal_typing_modifier())
         if base is None or self._bindings.quick_select_slot(base) is None:
             return False
         character = literal_character(base)

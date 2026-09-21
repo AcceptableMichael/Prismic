@@ -50,14 +50,17 @@ item-tags panel currently has numbered in that slot -- see
 `MainWindow` for which side of the checked/unchecked split is currently
 numbered. Only the non-text-editing case is handled here, though: while a
 text box has focus, `MainWindow.eventFilter` intercepts them itself, ahead
-of ever calling in here, since Ctrl+<that key> needs to insert a literal
-character into that specific focused widget -- something this controller
-has no widget access to do, being a plain callback dispatcher. (Emphasis
-on *insert*: letting a Ctrl+digit `QKeyEvent` fall through to the widget
-unhandled does not, in practice, type anything -- Windows hands Qt an
-empty `text()` for most Ctrl+digit combinations, confirmed empirically
-here, so passthrough alone would silently make those keys untypable in
-these fields even with Ctrl held.)
+of ever calling in here, since <configured modifier>+<that key> needs to
+insert a literal character into that specific focused widget --
+something this controller has no widget access to do, being a plain
+callback dispatcher. (Emphasis on *insert*: letting that combination's
+`QKeyEvent` fall through to the widget unhandled does not, in practice,
+type anything -- Windows hands Qt an empty `text()` for most Ctrl+digit
+combinations, confirmed empirically here, so passthrough alone would
+silently make those keys untypable in these fields even with the
+modifier held. Which modifier this is is itself a shortcut --
+`shortcuts.TYPE_LITERALLY_MODIFIER`, "Ctrl" by default -- not fixed
+here or anywhere else in this file.)
 
 The numbering-swap gesture (Ctrl tapped alone, nothing else pressed while
 it's down) is a third, unrelated kind of shortcut, also handled entirely
@@ -128,13 +131,21 @@ def key_text(event: QKeyEvent) -> str | None:
     return text or None
 
 
-def strip_control(binding: str) -> str | None:
-    """`binding` without a leading "Ctrl+", or None if it had none.
+def strip_modifier_prefix(binding: str, modifier: str) -> str | None:
+    """`binding` without a leading "`modifier`+", or None if it doesn't
+    start with that prefix -- including when `modifier` itself is "",
+    i.e. the escape hatch it backs has been unbound entirely.
 
-    Used for the "Ctrl+<quick-select key> types the character instead of
-    toggling a tag" escape hatch -- see `MainWindow.eventFilter`.
+    Used for the "<configured modifier>+<quick-select key> types the
+    character instead of toggling a tag" escape hatch -- see
+    `MainWindow._handle_quick_select_while_typing`. `modifier` is
+    `ShortcutBindings.literal_typing_modifier()` ("Ctrl" by default, but
+    user-configurable like everything else in the registry), not
+    hard-coded here -- this file still names no key of its own.
     """
-    prefix = "Ctrl+"
+    if not modifier:
+        return None
+    prefix = f"{modifier}+"
     return binding[len(prefix) :] if binding.startswith(prefix) else None
 
 

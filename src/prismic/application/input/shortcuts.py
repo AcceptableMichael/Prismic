@@ -76,10 +76,20 @@ class ShortcutScope(Enum):
     resolves it to whichever is live (see `ui/keyboard.py`'s module
     docstring). Flagging the app's own shipped defaults as a conflict
     would make the warning worthless.
+
+    `MODIFIER` is the same idea for a different reason: it holds bindings
+    that aren't a command someone presses, but a modifier held down to
+    change what some *other* key does -- `TYPE_LITERALLY_MODIFIER` is the
+    only one today. It defaults to "Ctrl", same as the numbering swap's
+    own tap gesture (`GLOBAL`) -- one is "tap Ctrl alone," the other is
+    "hold Ctrl while pressing something else," and a user can have both
+    on Ctrl at once without either ever getting in the other's way. That
+    would read as a conflict if the two shared a scope.
     """
 
     GLOBAL = auto()
     VIEWER = auto()
+    MODIFIER = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +123,7 @@ NAVIGATE_NEXT_WHILE_TYPING = "navigate.next_while_typing"
 
 FOCUS_TAG_SEARCH = "tagging.focus_search"
 DISMISS = "tagging.dismiss"
+TYPE_LITERALLY_MODIFIER = "tagging.type_literally_modifier"
 
 
 def quick_select_id(slot: int) -> str:
@@ -125,18 +136,30 @@ VIEWER_PLAY_PAUSE = "viewer.play_pause"
 
 _QUICK_SELECT_DEFAULTS: tuple[str, ...] = ("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
 
+_TYPE_LITERALLY_LABEL = "Type the key instead of toggling"
+
 
 def _quick_select_definitions() -> Iterator[ShortcutDefinition]:
     for slot in range(QUICK_SELECT_SLOT_COUNT):
+        # Only the first of these ten spells out the modifier escape
+        # hatch -- see TYPE_LITERALLY_MODIFIER just above, which every
+        # slot shares equally. Repeating the same paragraph ten times
+        # over would bury the one thing worth reading in nine copies of
+        # it.
+        description = (
+            f"Toggle whichever tag the Edit list currently numbers {slot + 1} "
+            "on the file being viewed"
+        )
+        if slot == 0:
+            description += (
+                f'. Still works while a tag search box has focus -- see "'
+                f'{_TYPE_LITERALLY_LABEL}" above to type the key there instead'
+            )
         yield ShortcutDefinition(
             id=quick_select_id(slot),
             category="Tagging",
             label=f"Toggle numbered tag {slot + 1}",
-            description=(
-                f"Toggle whichever tag the Edit list currently numbers {slot + 1} "
-                "on the file being viewed. Still works while a tag search box has "
-                "focus -- hold Ctrl to type the key there instead"
-            ),
+            description=description,
             default=_QUICK_SELECT_DEFAULTS[slot],
         )
 
@@ -232,6 +255,17 @@ SHORTCUTS: tuple[ShortcutDefinition, ...] = (
         label="Dismiss",
         description="Leave the tag search box, and exit focus mode",
         default="Esc",
+    ),
+    ShortcutDefinition(
+        id=TYPE_LITERALLY_MODIFIER,
+        category="Tagging",
+        label=_TYPE_LITERALLY_LABEL,
+        description=(
+            "Hold this modifier while pressing a numbered-tag shortcut's key, in a "
+            "tag search box, to type that key instead of toggling the tag"
+        ),
+        default="Ctrl",
+        scope=ShortcutScope.MODIFIER,
     ),
     *_quick_select_definitions(),
     ShortcutDefinition(
@@ -343,6 +377,13 @@ class ShortcutBindings:
             if self.binding(quick_select_id(slot)) == binding:
                 return slot
         return None
+
+    def literal_typing_modifier(self) -> str:
+        """The modifier that types a quick-select key literally instead of
+        toggling it, while a tag search box has focus -- see
+        `TYPE_LITERALLY_MODIFIER`. "" if unbound, which turns the escape
+        hatch off entirely rather than leaving it stuck on some key."""
+        return self.binding(TYPE_LITERALLY_MODIFIER)
 
     def conflicts(self, shortcut_id: str, binding: str) -> tuple[str, ...]:
         """Other shortcuts in the same scope already using `binding`."""

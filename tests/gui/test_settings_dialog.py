@@ -84,6 +84,17 @@ def test_a_bare_modifier_binding_says_it_is_a_tap(dialog: SettingsDialog) -> Non
     assert editor.text() == "Ctrl (tapped alone)"
 
 
+def test_the_type_literally_modifier_reads_as_held_not_tapped(dialog: SettingsDialog) -> None:
+    """The same bare-modifier binding means something different on this
+    one row -- held down for another key, not tapped and released -- so
+    it needs different parenthetical text, not the generic "tapped
+    alone" every other bare-modifier binding gets."""
+    editor = row_for(dialog, shortcuts.TYPE_LITERALLY_MODIFIER)._editor
+    assert isinstance(editor, KeyCaptureButton)
+
+    assert editor.text() == "Ctrl (held)"
+
+
 def test_an_unbound_shortcut_reads_as_not_set(
     dialog: SettingsDialog, bindings: ShortcutBindings
 ) -> None:
@@ -413,6 +424,14 @@ def test_sharing_a_key_across_input_contexts_is_not_a_conflict(
     worthless."""
     assert not row_for(dialog, shortcuts.FOCUS_MODE)._conflict.isVisibleTo(dialog)
     assert not row_for(dialog, shortcuts.VIEWER_PLAY_PAUSE)._conflict.isVisibleTo(dialog)
+
+
+def test_the_type_literally_modifier_sharing_ctrl_is_not_a_conflict(dialog: SettingsDialog) -> None:
+    """Both default to plain Ctrl -- tapped alone for the numbering swap,
+    held down for this one -- which is exactly the "different input
+    context" case `ShortcutScope` exists for, not a real collision."""
+    assert not row_for(dialog, shortcuts.SWAP_TAG_NUMBERING)._conflict.isVisibleTo(dialog)
+    assert not row_for(dialog, shortcuts.TYPE_LITERALLY_MODIFIER)._conflict.isVisibleTo(dialog)
 
 
 # -- Reporting changes back -----------------------------------------------------------
