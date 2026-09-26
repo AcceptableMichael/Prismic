@@ -109,7 +109,6 @@ class ShortcutDefinition:
 
 OPEN_COLLECTION_FOLDER = "collection.open_folder"
 OPEN_COLLECTION_FILE = "collection.open_file"
-RESCAN = "collection.rescan"
 OPEN_SETTINGS = "collection.settings"
 
 TOGGLE_THUMBNAILS = "view.toggle_thumbnails"
@@ -180,13 +179,6 @@ SHORTCUTS: tuple[ShortcutDefinition, ...] = (
         label="Open .prismic file",
         description="Open an existing .prismic collection file",
         default="Ctrl+Shift+O",
-    ),
-    ShortcutDefinition(
-        id=RESCAN,
-        category="Collection",
-        label="Rescan",
-        description="Rescan the collection folder for changes",
-        default="Ctrl+R",
     ),
     ShortcutDefinition(
         id=OPEN_SETTINGS,

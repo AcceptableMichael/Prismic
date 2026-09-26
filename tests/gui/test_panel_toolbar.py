@@ -8,7 +8,6 @@ import pytest
 from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
-from prismic.application.input import shortcuts
 from prismic.domain.media import Media, MediaState
 from prismic.ui.main_window import MainWindow
 
@@ -298,46 +297,16 @@ def test_the_exiting_click_does_nothing_else(qtbot: QtBot, window: MainWindow) -
 # the wiring by inspection.
 
 
-def test_shuffle_shortcut_fires_once_rebound_off_its_colliding_default(
-    qtbot: QtBot, open_window: MainWindow
-) -> None:
-    """Shuffle's own default (Ctrl+R) collides with Rescan's, at the
-    user's explicit request -- and Rescan, a real `QAction` with its own
-    `QShortcut`, wins that particular key outright by default, since only
-    one shortcut can ever actually fire from a single keypress. That's
-    exactly the conflict Settings reports rather than silently resolving
-    (see `test_shortcuts.py::test_rescan_and_shuffle_share_ctrl_r_as_a_
-    reported_conflict`) -- not a dispatch bug, and not this test's
-    concern. What this test pins is that Shuffle's own wiring works once
-    a user has actually rebound one of the two off Ctrl+R, which is what
-    the conflict warning is there to prompt."""
-    open_window.bindings.set_binding(shortcuts.SHUFFLE_RESULTS, "Ctrl+Shift+R")
-    open_window._apply_bindings()
-    open_window.result_list.setFocus()
-    qtbot.waitUntil(lambda: open_window.result_list.hasFocus(), timeout=1000)
-
-    qtbot.keyClick(
-        open_window.result_list,
-        Qt.Key.Key_R,
-        Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
-    )
-
-    assert open_window.panel_toolbar.shuffle_button.isChecked()
-
-
-def test_ctrl_r_by_default_rescans_rather_than_shuffling(
-    qtbot: QtBot, open_window: MainWindow
-) -> None:
-    """The other half of the same story: out of the box, Ctrl+R is
-    Rescan's key, not Shuffle's, even though Shuffle also claims it as a
-    default -- confirms which of the two conflicting shortcuts actually
-    wins the physical key before any rebinding happens."""
+def test_ctrl_r_shuffles_by_default(qtbot: QtBot, open_window: MainWindow) -> None:
+    """Rescan is menu-only (no shortcut of its own -- see `shortcuts.py`),
+    so Shuffle's default of Ctrl+R doesn't collide with anything and just
+    fires directly."""
     open_window.result_list.setFocus()
     qtbot.waitUntil(lambda: open_window.result_list.hasFocus(), timeout=1000)
 
     qtbot.keyClick(open_window.result_list, Qt.Key.Key_R, Qt.KeyboardModifier.ControlModifier)
 
-    assert not open_window.panel_toolbar.shuffle_button.isChecked()
+    assert open_window.panel_toolbar.shuffle_button.isChecked()
 
 
 def test_ctrl_f_toggles_fullscreen(qtbot: QtBot, open_window: MainWindow) -> None:

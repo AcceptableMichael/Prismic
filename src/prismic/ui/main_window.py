@@ -345,8 +345,10 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        rescan_action = file_menu.addAction("Rescan", self._rescan)
-        self._register_action_shortcut(rescan_action, file_menu, shortcuts.RESCAN)
+        # Menu-only, deliberately: no shortcut id, no QShortcut, no hover
+        # hint -- rescanning is rare enough that it doesn't need a key of
+        # its own competing for bindings.
+        file_menu.addAction("Rescan", self._rescan)
 
         file_menu.addSeparator()
 

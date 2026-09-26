@@ -564,15 +564,15 @@ def test_rebinding_the_tag_search_cycle_moves_the_whole_cycle(
 
 
 def test_rebinding_a_menu_shortcut_updates_the_action(window: MainWindow) -> None:
-    rebind(window, shortcuts.RESCAN, "F5")
+    rebind(window, shortcuts.OPEN_SETTINGS, "F5")
 
-    assert window._shortcut_actions[shortcuts.RESCAN].shortcut() == QKeySequence("F5")
+    assert window._shortcut_actions[shortcuts.OPEN_SETTINGS].shortcut() == QKeySequence("F5")
 
 
 def test_unbinding_a_menu_shortcut_leaves_the_action_with_no_key(window: MainWindow) -> None:
-    rebind(window, shortcuts.RESCAN, "")
+    rebind(window, shortcuts.OPEN_SETTINGS, "")
 
-    assert window._shortcut_actions[shortcuts.RESCAN].shortcut().isEmpty()
+    assert window._shortcut_actions[shortcuts.OPEN_SETTINGS].shortcut().isEmpty()
 
 
 def test_the_focus_mode_menu_entry_shows_its_current_key(window: MainWindow) -> None:
@@ -879,11 +879,13 @@ def test_opening_settings_applies_what_is_changed_in_it(
     window.open_settings()
 
     assert len(opened) == 1
-    row = next(r for r in opened[0].shortcuts_panel.rows if r.definition.id == shortcuts.RESCAN)
+    row = next(
+        r for r in opened[0].shortcuts_panel.rows if r.definition.id == shortcuts.TOGGLE_THUMBNAILS
+    )
     qtbot.mouseClick(row._clear_button, Qt.MouseButton.LeftButton)
 
-    assert window.bindings.binding(shortcuts.RESCAN) == ""
-    assert window._shortcut_actions[shortcuts.RESCAN].shortcut().isEmpty()
+    assert window.bindings.binding(shortcuts.TOGGLE_THUMBNAILS) == ""
+    assert window._shortcut_actions[shortcuts.TOGGLE_THUMBNAILS].shortcut().isEmpty()
 
 
 def test_the_settings_menu_entry_opens_the_window(
@@ -907,10 +909,10 @@ def test_bindings_persist_across_windows(qtbot: QtBot) -> None:
     the app being closed and reopened."""
     first = MainWindow()
     qtbot.addWidget(first)
-    first.bindings.set_binding(shortcuts.RESCAN, "F5")
+    first.bindings.set_binding(shortcuts.OPEN_SETTINGS, "F5")
 
     second = MainWindow()
     qtbot.addWidget(second)
 
-    assert second.bindings.binding(shortcuts.RESCAN) == "F5"
-    assert second._shortcut_actions[shortcuts.RESCAN].shortcut() == QKeySequence("F5")
+    assert second.bindings.binding(shortcuts.OPEN_SETTINGS) == "F5"
+    assert second._shortcut_actions[shortcuts.OPEN_SETTINGS].shortcut() == QKeySequence("F5")

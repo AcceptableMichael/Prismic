@@ -46,18 +46,8 @@ def test_categories_group_contiguously() -> None:
 
 
 def test_defaults_do_not_collide_within_a_scope(bindings: ShortcutBindings) -> None:
-    # Rescan and Shuffle are a known, deliberate exception: both default
-    # to Ctrl+R, at the user's explicit request, on the same "let a
-    # conflict be reported rather than prevented" basis the rest of this
-    # registry already runs on -- Settings surfaces it (see
-    # `test_settings_dialog.py`), it isn't silently resolved here.
-    known_conflicts = {
-        shortcuts.RESCAN: (shortcuts.SHUFFLE_RESULTS,),
-        shortcuts.SHUFFLE_RESULTS: (shortcuts.RESCAN,),
-    }
     for definition in SHORTCUTS:
-        expected = known_conflicts.get(definition.id, ())
-        assert bindings.conflicts(definition.id, definition.default) == expected, definition.id
+        assert bindings.conflicts(definition.id, definition.default) == (), definition.id
 
 
 def test_focus_mode_and_play_pause_share_space_across_scopes(
@@ -69,21 +59,6 @@ def test_focus_mode_and_play_pause_share_space_across_scopes(
     assert bindings.binding(shortcuts.FOCUS_MODE) == "Space"
     assert bindings.binding(shortcuts.VIEWER_PLAY_PAUSE) == "Space"
     assert bindings.conflicts(shortcuts.FOCUS_MODE, "Space") == ()
-
-
-def test_rescan_and_shuffle_share_ctrl_r_as_a_reported_conflict(
-    bindings: ShortcutBindings,
-) -> None:
-    """Unlike Focus Mode/play-pause, this one *is* a same-scope
-    conflict -- both fire a real command on an ordinary keypress, so
-    there's no input-context distinction to resolve it the way scope
-    does for a bare-modifier tap. Left in place anyway, at the user's
-    explicit request: a shortcut's defaults are "a regular input" like
-    any binding a user could type in themselves, reported in Settings
-    rather than silently prevented."""
-    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
-    assert bindings.binding(shortcuts.SHUFFLE_RESULTS) == "Ctrl+R"
-    assert bindings.conflicts(shortcuts.RESCAN, "Ctrl+R") == (shortcuts.SHUFFLE_RESULTS,)
 
 
 def test_every_quick_select_slot_has_a_shortcut(bindings: ShortcutBindings) -> None:
@@ -160,37 +135,37 @@ def test_keycaps_handles_the_plus_key_itself() -> None:
 
 
 def test_an_untouched_shortcut_reports_its_default(bindings: ShortcutBindings) -> None:
-    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
-    assert bindings.is_default(shortcuts.RESCAN)
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+O"
+    assert bindings.is_default(shortcuts.OPEN_COLLECTION_FOLDER)
 
 
 def test_setting_a_binding_overrides_the_default(bindings: ShortcutBindings) -> None:
-    bindings.set_binding(shortcuts.RESCAN, "F5")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "F5")
 
-    assert bindings.binding(shortcuts.RESCAN) == "F5"
-    assert not bindings.is_default(shortcuts.RESCAN)
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "F5"
+    assert not bindings.is_default(shortcuts.OPEN_COLLECTION_FOLDER)
 
 
 def test_setting_a_binding_back_to_its_default_clears_the_override(
     bindings: ShortcutBindings,
 ) -> None:
-    bindings.set_binding(shortcuts.RESCAN, "F5")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "F5")
 
-    bindings.set_binding(shortcuts.RESCAN, "Ctrl+R")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "Ctrl+O")
 
-    assert bindings.is_default(shortcuts.RESCAN)
+    assert bindings.is_default(shortcuts.OPEN_COLLECTION_FOLDER)
 
 
 def test_reset_restores_the_default(bindings: ShortcutBindings) -> None:
-    bindings.set_binding(shortcuts.RESCAN, "F5")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "F5")
 
-    bindings.reset(shortcuts.RESCAN)
+    bindings.reset(shortcuts.OPEN_COLLECTION_FOLDER)
 
-    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+O"
 
 
 def test_reset_all_restores_every_default(bindings: ShortcutBindings) -> None:
-    bindings.set_binding(shortcuts.RESCAN, "F5")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "F5")
     bindings.set_binding(shortcuts.NAVIGATE_NEXT, "F6")
 
     bindings.reset_all()
@@ -199,17 +174,13 @@ def test_reset_all_restores_every_default(bindings: ShortcutBindings) -> None:
 
 
 def test_a_shortcut_can_be_unbound(bindings: ShortcutBindings) -> None:
-    bindings.set_binding(shortcuts.RESCAN, "")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "")
 
-    assert bindings.binding(shortcuts.RESCAN) == ""
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == ""
     assert bindings.shortcut_for("") is None  # an unbound one is never "pressed"
 
 
 def test_shortcut_for_finds_the_command_a_key_triggers(bindings: ShortcutBindings) -> None:
-    # Settings, not Rescan: its default ("Ctrl+,") isn't shared with
-    # anything else, so freeing it up by rebinding away is unambiguous --
-    # unlike Ctrl+R, which Shuffle still legitimately answers to (see
-    # `test_rescan_and_shuffle_share_ctrl_r_as_a_reported_conflict`).
     assert bindings.shortcut_for("Ctrl+,") == shortcuts.OPEN_SETTINGS
     assert bindings.shortcut_for("F5") is None
 
@@ -227,14 +198,12 @@ def test_shortcut_for_only_searches_the_requested_scope(bindings: ShortcutBindin
 def test_conflicts_reports_another_shortcut_on_the_same_key(
     bindings: ShortcutBindings,
 ) -> None:
-    assert bindings.conflicts(shortcuts.RESCAN, "Ctrl+T") == (shortcuts.TOGGLE_THUMBNAILS,)
+    assert bindings.conflicts(shortcuts.OPEN_COLLECTION_FOLDER, "Ctrl+T") == (
+        shortcuts.TOGGLE_THUMBNAILS,
+    )
 
 
 def test_conflicts_ignores_the_shortcut_being_asked_about(bindings: ShortcutBindings) -> None:
-    # Settings again, for the same reason as the test above -- Ctrl+R
-    # would report Shuffle here too now, which is correct but is a
-    # different thing than what this test is pinning (that a shortcut
-    # never reports a conflict against itself).
     assert bindings.conflicts(shortcuts.OPEN_SETTINGS, "Ctrl+,") == ()
 
 
@@ -258,16 +227,18 @@ def test_nothing_in_the_registry_restricts_which_shortcuts_can_be_tapped(
     """The gesture is a property of what the user bound, not of the
     command -- so any shortcut takes a bare modifier, and it resolves
     like any other binding."""
-    bindings.set_binding(shortcuts.RESCAN, "Alt")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "Alt")
 
-    assert bindings.shortcut_for("Alt") == shortcuts.RESCAN
-    assert shortcuts.is_modifier_only(bindings.binding(shortcuts.RESCAN))
+    assert bindings.shortcut_for("Alt") == shortcuts.OPEN_COLLECTION_FOLDER
+    assert shortcuts.is_modifier_only(bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER))
 
 
 def test_a_modifier_binding_collides_with_another_like_any_other_key(
     bindings: ShortcutBindings,
 ) -> None:
-    assert bindings.conflicts(shortcuts.RESCAN, "Ctrl") == (shortcuts.SWAP_TAG_NUMBERING,)
+    assert bindings.conflicts(shortcuts.OPEN_COLLECTION_FOLDER, "Ctrl") == (
+        shortcuts.SWAP_TAG_NUMBERING,
+    )
 
 
 # -- Persistence ---------------------------------------------------------------
@@ -275,9 +246,9 @@ def test_a_modifier_binding_collides_with_another_like_any_other_key(
 
 def test_overrides_survive_a_reload(tmp_path: Path) -> None:
     store = PreferencesStore(tmp_path / "preferences.json")
-    ShortcutBindings(store).set_binding(shortcuts.RESCAN, "F5")
+    ShortcutBindings(store).set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "F5")
 
-    assert ShortcutBindings(store).binding(shortcuts.RESCAN) == "F5"
+    assert ShortcutBindings(store).binding(shortcuts.OPEN_COLLECTION_FOLDER) == "F5"
 
 
 def test_only_overrides_are_written_not_the_whole_table(tmp_path: Path) -> None:
@@ -287,17 +258,17 @@ def test_only_overrides_are_written_not_the_whole_table(tmp_path: Path) -> None:
     store = PreferencesStore(tmp_path / "preferences.json")
     bindings = ShortcutBindings(store)
 
-    bindings.set_binding(shortcuts.RESCAN, "F5")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "F5")
 
-    assert store.load()["shortcuts"] == {shortcuts.RESCAN: "F5"}
+    assert store.load()["shortcuts"] == {shortcuts.OPEN_COLLECTION_FOLDER: "F5"}
 
 
 def test_resetting_the_last_override_removes_the_section_entirely(tmp_path: Path) -> None:
     store = PreferencesStore(tmp_path / "preferences.json")
     bindings = ShortcutBindings(store)
-    bindings.set_binding(shortcuts.RESCAN, "F5")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "F5")
 
-    bindings.reset(shortcuts.RESCAN)
+    bindings.reset(shortcuts.OPEN_COLLECTION_FOLDER)
 
     assert "shortcuts" not in store.load()
 
@@ -306,7 +277,7 @@ def test_unrelated_preferences_are_left_alone(tmp_path: Path) -> None:
     store = PreferencesStore(tmp_path / "preferences.json")
     store.save({"something-else": 42})
 
-    ShortcutBindings(store).set_binding(shortcuts.RESCAN, "F5")
+    ShortcutBindings(store).set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "F5")
 
     assert store.load()["something-else"] == 42
 
@@ -316,24 +287,24 @@ def test_an_unknown_shortcut_id_in_the_file_is_ignored(tmp_path: Path) -> None:
     from an older build shouldn't crash startup or survive the next
     save."""
     store = PreferencesStore(tmp_path / "preferences.json")
-    store.save({"shortcuts": {"nope.not.a.shortcut": "F5", shortcuts.RESCAN: "F6"}})
+    store.save({"shortcuts": {"nope.not.a.shortcut": "F5", shortcuts.OPEN_COLLECTION_FOLDER: "F6"}})
 
     bindings = ShortcutBindings(store)
     bindings.set_binding(shortcuts.NAVIGATE_NEXT, "F7")
 
     assert "nope.not.a.shortcut" not in store.load()["shortcuts"]
-    assert bindings.binding(shortcuts.RESCAN) == "F6"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "F6"
 
 
 def test_a_non_string_binding_in_the_file_is_ignored(tmp_path: Path) -> None:
     store = PreferencesStore(tmp_path / "preferences.json")
-    store.save({"shortcuts": {shortcuts.RESCAN: 5}})
+    store.save({"shortcuts": {shortcuts.OPEN_COLLECTION_FOLDER: 5}})
 
-    assert ShortcutBindings(store).binding(shortcuts.RESCAN) == "Ctrl+R"
+    assert ShortcutBindings(store).binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+O"
 
 
 def test_a_malformed_shortcuts_section_is_ignored(tmp_path: Path) -> None:
     store = PreferencesStore(tmp_path / "preferences.json")
     store.save({"shortcuts": "not a mapping"})
 
-    assert ShortcutBindings(store).binding(shortcuts.RESCAN) == "Ctrl+R"
+    assert ShortcutBindings(store).binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+O"

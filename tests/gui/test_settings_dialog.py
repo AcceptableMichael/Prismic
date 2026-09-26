@@ -98,10 +98,10 @@ def test_the_type_literally_modifier_reads_as_held_not_tapped(dialog: SettingsDi
 def test_an_unbound_shortcut_reads_as_not_set(
     dialog: SettingsDialog, bindings: ShortcutBindings
 ) -> None:
-    bindings.set_binding(shortcuts.RESCAN, "")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "")
     dialog.shortcuts_panel.refresh()
 
-    editor = row_for(dialog, shortcuts.RESCAN)._editor
+    editor = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(editor, KeyCaptureButton)
     assert editor.text() == "Not set"
 
@@ -110,10 +110,10 @@ def test_an_unbound_shortcut_reads_as_not_set(
 
 
 def test_the_search_box_narrows_the_list(dialog: SettingsDialog) -> None:
-    dialog.shortcuts_panel.search_box.setText("rescan")
+    dialog.shortcuts_panel.search_box.setText("folder")
 
     visible = [row.definition.id for row in dialog.shortcuts_panel.visible_rows()]
-    assert visible == [shortcuts.RESCAN]
+    assert visible == [shortcuts.OPEN_COLLECTION_FOLDER]
 
 
 def test_the_search_box_also_matches_the_key_itself(dialog: SettingsDialog) -> None:
@@ -126,7 +126,7 @@ def test_the_search_box_also_matches_the_key_itself(dialog: SettingsDialog) -> N
 
 
 def test_clearing_the_search_box_brings_every_row_back(dialog: SettingsDialog) -> None:
-    dialog.shortcuts_panel.search_box.setText("rescan")
+    dialog.shortcuts_panel.search_box.setText("folder")
     dialog.shortcuts_panel.search_box.setText("")
 
     assert len(dialog.shortcuts_panel.visible_rows()) == len(SHORTCUTS)
@@ -136,7 +136,7 @@ def test_clearing_the_search_box_brings_every_row_back(dialog: SettingsDialog) -
 
 
 def test_clicking_the_key_box_starts_capturing(qtbot: QtBot, dialog: SettingsDialog) -> None:
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
 
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
@@ -148,13 +148,13 @@ def test_clicking_the_key_box_starts_capturing(qtbot: QtBot, dialog: SettingsDia
 def test_pressing_a_key_while_capturing_rebinds_the_shortcut(
     qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
 ) -> None:
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
     qtbot.keyClick(button, Qt.Key.Key_F5)
 
-    assert bindings.binding(shortcuts.RESCAN) == "F5"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "F5"
     assert not button.is_capturing
     assert button.text() == "F5"
 
@@ -162,7 +162,7 @@ def test_pressing_a_key_while_capturing_rebinds_the_shortcut(
 def test_capturing_records_the_modifiers_too(
     qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
 ) -> None:
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
@@ -172,13 +172,13 @@ def test_capturing_records_the_modifiers_too(
         Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier,
     )
 
-    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+Alt+K"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+Alt+K"
 
 
 def test_a_bare_modifier_does_not_end_the_capture(qtbot: QtBot, dialog: SettingsDialog) -> None:
     """Ctrl on its own is the user starting a combination, not finishing
     one -- the box keeps waiting for the rest."""
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
@@ -195,7 +195,7 @@ def test_closing_the_window_mid_capture_releases_the_keyboard(
     nothing on screen to explain why. Losing focus is the usual way out,
     but closing the window mid-capture doesn't reliably deliver a
     focus-out first."""
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
     assert button.is_capturing
@@ -209,14 +209,14 @@ def test_closing_the_window_mid_capture_releases_the_keyboard(
 def test_escape_cancels_a_capture_without_changing_anything(
     qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
 ) -> None:
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
     qtbot.keyClick(button, Qt.Key.Key_Escape)
 
     assert not button.is_capturing
-    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+O"
     assert dialog.isVisible()  # and it didn't close the dialog either
 
 
@@ -230,13 +230,13 @@ def test_capturing_tab_binds_tab_rather_than_moving_focus(
     bindable -- Tab most of all, since it's a real default here. (It's
     already taken by the tag-search cycle, hence the conflict prompt.)"""
     accept_all(monkeypatch)
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
     qtbot.keyClick(button, Qt.Key.Key_Tab)
 
-    assert bindings.binding(shortcuts.RESCAN) == "Tab"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Tab"
 
 
 def test_capturing_space_binds_space_rather_than_re_pressing_the_button(
@@ -248,13 +248,13 @@ def test_capturing_space_binds_space_rather_than_re_pressing_the_button(
     """Space would otherwise activate the focused capture button itself,
     ending the capture instead of being recorded by it."""
     accept_all(monkeypatch)
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
     qtbot.keyClick(button, Qt.Key.Key_Space)
 
-    assert bindings.binding(shortcuts.RESCAN) == "Space"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Space"
 
 
 def test_tapping_a_modifier_alone_binds_the_modifier(
@@ -263,14 +263,14 @@ def test_tapping_a_modifier_alone_binds_the_modifier(
     """Pressed and released with nothing in between, a modifier is a
     binding in its own right -- which is how the numbering swap gets its
     default of plain Ctrl through the ordinary capture box."""
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
     qtbot.keyPress(button, Qt.Key.Key_Alt)
     qtbot.keyRelease(button, Qt.Key.Key_Alt)
 
-    assert bindings.binding(shortcuts.RESCAN) == "Alt"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Alt"
     assert not button.is_capturing
 
 
@@ -279,7 +279,7 @@ def test_a_modifier_released_after_a_combination_is_not_a_tap(
 ) -> None:
     """Ctrl+K is one binding, not Ctrl+K followed by a stray Ctrl tap --
     the capture has to already be finished by the time Ctrl comes up."""
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
@@ -292,7 +292,7 @@ def test_a_modifier_released_after_a_combination_is_not_a_tap(
     qtbot.keyRelease(button, Qt.Key.Key_K)
     qtbot.keyRelease(button, Qt.Key.Key_Control)
 
-    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+K"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+K"
 
 
 def test_two_modifiers_held_together_are_not_a_tap(
@@ -300,7 +300,7 @@ def test_two_modifiers_held_together_are_not_a_tap(
 ) -> None:
     """Ctrl held while Shift goes down isn't either one tapped alone, so
     the box keeps waiting rather than guessing which was meant."""
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
@@ -309,7 +309,7 @@ def test_two_modifiers_held_together_are_not_a_tap(
     qtbot.keyRelease(button, Qt.Key.Key_Shift)
     qtbot.keyRelease(button, Qt.Key.Key_Control)
 
-    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"  # unchanged
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+O"  # unchanged
     assert button.is_capturing  # still waiting for something bindable
 
 
@@ -319,17 +319,17 @@ def test_two_modifiers_held_together_are_not_a_tap(
 def test_clear_unbinds_the_shortcut(
     qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
 ) -> None:
-    row = row_for(dialog, shortcuts.RESCAN)
+    row = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)
 
     qtbot.mouseClick(row._clear_button, Qt.MouseButton.LeftButton)
 
-    assert bindings.binding(shortcuts.RESCAN) == ""
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == ""
 
 
 def test_reset_is_only_offered_once_a_shortcut_has_been_changed(
     qtbot: QtBot, dialog: SettingsDialog
 ) -> None:
-    row = row_for(dialog, shortcuts.RESCAN)
+    row = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)
     assert not row._reset_button.isEnabled()
 
     qtbot.mouseClick(row._clear_button, Qt.MouseButton.LeftButton)
@@ -340,12 +340,12 @@ def test_reset_is_only_offered_once_a_shortcut_has_been_changed(
 def test_reset_puts_a_shortcut_back(
     qtbot: QtBot, dialog: SettingsDialog, bindings: ShortcutBindings
 ) -> None:
-    row = row_for(dialog, shortcuts.RESCAN)
+    row = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)
     qtbot.mouseClick(row._clear_button, Qt.MouseButton.LeftButton)
 
     qtbot.mouseClick(row._reset_button, Qt.MouseButton.LeftButton)
 
-    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+O"
 
 
 def test_restore_all_defaults_resets_every_shortcut(
@@ -355,7 +355,7 @@ def test_restore_all_defaults_resets_every_shortcut(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     accept_all(monkeypatch)
-    bindings.set_binding(shortcuts.RESCAN, "F5")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "F5")
     bindings.set_binding(shortcuts.NAVIGATE_NEXT, "F6")
 
     qtbot.mouseClick(dialog.shortcuts_panel._restore_button, Qt.MouseButton.LeftButton)
@@ -373,13 +373,13 @@ def test_taking_a_key_from_another_shortcut_asks_first_and_clears_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     accept_all(monkeypatch)
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
     qtbot.keyClick(button, Qt.Key.Key_T, Qt.KeyboardModifier.ControlModifier)
 
-    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+T"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+T"
     assert bindings.binding(shortcuts.TOGGLE_THUMBNAILS) == ""
 
 
@@ -392,13 +392,13 @@ def test_declining_the_conflict_leaves_both_shortcuts_alone(
     monkeypatch.setattr(
         MessageDialog, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Cancel
     )
-    button = row_for(dialog, shortcuts.RESCAN)._editor
+    button = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._editor
     assert isinstance(button, KeyCaptureButton)
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
     qtbot.keyClick(button, Qt.Key.Key_T, Qt.KeyboardModifier.ControlModifier)
 
-    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
+    assert bindings.binding(shortcuts.OPEN_COLLECTION_FOLDER) == "Ctrl+O"
     assert bindings.binding(shortcuts.TOGGLE_THUMBNAILS) == "Ctrl+T"
 
 
@@ -408,11 +408,11 @@ def test_a_conflict_already_in_the_file_is_shown_on_both_rows(
     """A hand-edited preferences file can produce a collision no prompt
     ever guarded, so the rows say so rather than silently leaving one of
     the two shortcuts dead."""
-    bindings.set_binding(shortcuts.RESCAN, "Ctrl+T")
+    bindings.set_binding(shortcuts.OPEN_COLLECTION_FOLDER, "Ctrl+T")
     dialog = SettingsDialog(bindings)
     qtbot.addWidget(dialog)
 
-    assert row_for(dialog, shortcuts.RESCAN)._conflict.isVisibleTo(dialog)
+    assert row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)._conflict.isVisibleTo(dialog)
     assert row_for(dialog, shortcuts.TOGGLE_THUMBNAILS)._conflict.isVisibleTo(dialog)
 
 
@@ -440,7 +440,7 @@ def test_the_type_literally_modifier_sharing_ctrl_is_not_a_conflict(dialog: Sett
 def test_the_dialog_reports_every_change_so_the_app_can_re_apply_it(
     qtbot: QtBot, dialog: SettingsDialog
 ) -> None:
-    row = row_for(dialog, shortcuts.RESCAN)
+    row = row_for(dialog, shortcuts.OPEN_COLLECTION_FOLDER)
 
     with qtbot.waitSignal(dialog.bindings_changed, timeout=1000):
         qtbot.mouseClick(row._clear_button, Qt.MouseButton.LeftButton)
