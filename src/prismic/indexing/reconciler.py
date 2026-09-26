@@ -21,7 +21,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from prismic.domain.collection import Collection
@@ -29,8 +29,22 @@ from prismic.domain.media import Media, MediaState
 from prismic.indexing.hashing import hash_file
 from prismic.indexing.scanner import scan
 from prismic.persistence.repositories.media_repository import MediaRepository
+from prismic.persistence.repositories.scan_stats_repository import ScanStatsRepository
 
-__all__ = ["HashedFile", "Reconciler", "ReconciliationResult", "hash_file", "run_reconciliation"]
+# Called as (files_processed_so_far, expected_total) while a scan is under
+# way. `expected_total` is last scan's file count, not this one's -- see
+# `run_reconciliation` -- so it's an estimate a caller may want to treat as
+# a lower bound (progress can legitimately pass 100% if the collection grew).
+ProgressCallback = Callable[[int, int], None]
+
+__all__ = [
+    "HashedFile",
+    "ProgressCallback",
+    "Reconciler",
+    "ReconciliationResult",
+    "hash_file",
+    "run_reconciliation",
+]
 # `hash_file` is re-exported (not just imported for internal use) so tests
 # can monkeypatch `prismic.indexing.reconciler.hash_file` specifically to
 # simulate a file disappearing between the scan and the hash.
@@ -235,6 +249,8 @@ def run_reconciliation(
     collection: Collection,
     generation: int,
     connection: sqlite3.Connection,
+    *,
+    on_progress: ProgressCallback | None = None,
 ) -> ReconciliationResult:
     """Scan `collection.root`, hash each candidate, and reconcile the result.
 
@@ -242,24 +258,41 @@ def run_reconciliation(
     should be a connection owned by whichever thread calls this — Phase 3's
     worker pool opens its own when dispatching this off the GUI thread,
     never reusing the session's main-thread connection.
+
+    `on_progress`, if given, is called after each candidate file is hashed
+    (or found unreadable) with the running count and the *previous* scan's
+    total file count as its denominator — this scan's own total isn't known
+    until it finishes walking the tree, so last time's count is the best
+    estimate available while it's still under way. That count is persisted
+    (via `ScanStatsRepository`) once this scan itself finishes walking, for
+    the *next* call to use.
     """
+    stats_repository = ScanStatsRepository(connection)
+    expected_total = stats_repository.get_last_file_count()
+
     hashed_files: list[HashedFile] = []
     unreadable_paths: set[str] = set()
+    processed = 0
 
     for scanned_file in scan(collection):
         try:
             content_hash = hash_file(scanned_file.absolute_path)
         except OSError:
             unreadable_paths.add(scanned_file.relative_path)
-            continue
-        hashed_files.append(
-            HashedFile(
-                relative_path=scanned_file.relative_path,
-                content_hash=content_hash,
-                size=scanned_file.size,
-                mtime=scanned_file.mtime,
+        else:
+            hashed_files.append(
+                HashedFile(
+                    relative_path=scanned_file.relative_path,
+                    content_hash=content_hash,
+                    size=scanned_file.size,
+                    mtime=scanned_file.mtime,
+                )
             )
-        )
+        processed += 1
+        if on_progress is not None:
+            on_progress(processed, expected_total)
+
+    stats_repository.set_last_file_count(processed)
 
     return reconciler.reconcile(
         connection, generation, hashed_files, unreadable_paths=frozenset(unreadable_paths)

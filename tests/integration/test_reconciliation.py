@@ -7,6 +7,7 @@ from prismic.domain.collection import Collection
 from prismic.domain.media import MediaState
 from prismic.indexing.reconciler import HashedFile, Reconciler, run_reconciliation
 from prismic.persistence.repositories.media_repository import MediaRepository
+from prismic.persistence.repositories.scan_stats_repository import ScanStatsRepository
 
 
 @pytest.fixture
@@ -216,6 +217,46 @@ def test_a_stale_reconciliation_is_discarded(
     )
     assert result.applied is True
     assert len(media_repository.list_all()) == 1
+
+
+def test_scan_reports_progress_against_the_previous_scans_count(
+    collection: Collection,
+    reconciler: Reconciler,
+    migrated_connection: sqlite3.Connection,
+) -> None:
+    (collection.root / "a.jpg").write_bytes(b"content")
+    (collection.root / "b.jpg").write_bytes(b"more content")
+    _run(reconciler, collection, migrated_connection)  # first scan: no prior count to report
+
+    (collection.root / "c.jpg").write_bytes(b"even more content")
+    calls: list[tuple[int, int]] = []
+    generation = reconciler.begin_scan()
+    run_reconciliation(
+        reconciler,
+        collection,
+        generation,
+        migrated_connection,
+        on_progress=lambda processed, total: calls.append((processed, total)),
+    )
+
+    # Three candidate files this pass, each reported as it's processed,
+    # against last scan's total (2) as the denominator throughout.
+    assert len(calls) == 3
+    assert {processed for processed, _ in calls} == {1, 2, 3}
+    assert all(expected_total == 2 for _, expected_total in calls)
+
+
+def test_scan_persists_its_own_file_count_for_the_next_scan_to_use(
+    collection: Collection,
+    reconciler: Reconciler,
+    migrated_connection: sqlite3.Connection,
+) -> None:
+    (collection.root / "a.jpg").write_bytes(b"content")
+    (collection.root / "b.jpg").write_bytes(b"more content")
+
+    _run(reconciler, collection, migrated_connection)
+
+    assert ScanStatsRepository(migrated_connection).get_last_file_count() == 2
 
 
 def test_reconciliation_can_run_on_a_separate_connection_to_the_same_file(

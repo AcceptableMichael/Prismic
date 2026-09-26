@@ -21,7 +21,12 @@ from prismic.application.state import ApplicationState
 from prismic.application.tag_recency import TagRecencyTracker
 from prismic.application.worker_pool import WorkerPool
 from prismic.domain.collection import Collection
-from prismic.indexing.reconciler import Reconciler, ReconciliationResult, run_reconciliation
+from prismic.indexing.reconciler import (
+    ProgressCallback,
+    Reconciler,
+    ReconciliationResult,
+    run_reconciliation,
+)
 from prismic.persistence import database
 from prismic.persistence.collection import OpenCollection, open_collection
 from prismic.persistence.repositories.mapping_repository import MappingRepository
@@ -40,7 +45,9 @@ class PrismicSession:
     worker pool.
     """
 
-    def __init__(self, opened: OpenCollection) -> None:
+    def __init__(
+        self, opened: OpenCollection, on_progress: ProgressCallback | None = None
+    ) -> None:
         self._opened = opened
         self.tags = TagRepository(opened.connection)
         self.media = MediaRepository(opened.connection)
@@ -55,11 +62,13 @@ class PrismicSession:
         self.worker_pool = WorkerPool()
         self.state.recompute(self.media, self.mappings)
 
-        self.initial_reconciliation: Future[ReconciliationResult] = self._scan_in_background()
+        self.initial_reconciliation: Future[ReconciliationResult] = self._scan_in_background(
+            on_progress
+        )
 
     @classmethod
-    def open(cls, path: Path) -> PrismicSession:
-        return cls(open_collection(path))
+    def open(cls, path: Path, on_progress: ProgressCallback | None = None) -> PrismicSession:
+        return cls(open_collection(path), on_progress)
 
     @property
     def collection(self) -> Collection:
@@ -71,7 +80,7 @@ class PrismicSession:
     def undo(self) -> bool:
         return self.dispatcher.undo()
 
-    def rescan(self) -> Future[ReconciliationResult]:
+    def rescan(self, on_progress: ProgressCallback | None = None) -> Future[ReconciliationResult]:
         """Kick off a fresh background scan/hash/reconcile pass.
 
         Any reconciliation already in flight becomes stale the moment this
@@ -87,8 +96,13 @@ class PrismicSession:
         "future is done" notification onto the GUI thread is Phase 5's job
         (e.g. a queued Qt signal); nothing here assumes a GUI event loop
         exists.
+
+        `on_progress`, if given, is called from the *background* thread as
+        the scan proceeds (see `indexing.reconciler.run_reconciliation`) —
+        a caller that needs it on the GUI thread must marshal it itself,
+        the same way `FutureWatcher` marshals the future's completion.
         """
-        return self._scan_in_background()
+        return self._scan_in_background(on_progress)
 
     def refresh_state(self) -> None:
         """Recompute `state` from the database's current contents.
@@ -99,7 +113,9 @@ class PrismicSession:
         """
         self.state.recompute(self.media, self.mappings)
 
-    def _scan_in_background(self) -> Future[ReconciliationResult]:
+    def _scan_in_background(
+        self, on_progress: ProgressCallback | None
+    ) -> Future[ReconciliationResult]:
         generation = self.reconciler.begin_scan()
         collection = self.collection
         database_path = collection.database_path
@@ -111,7 +127,11 @@ class PrismicSession:
             worker_connection = database.connect(database_path)
             try:
                 return run_reconciliation(
-                    self.reconciler, collection, generation, worker_connection
+                    self.reconciler,
+                    collection,
+                    generation,
+                    worker_connection,
+                    on_progress=on_progress,
                 )
             finally:
                 worker_connection.close()

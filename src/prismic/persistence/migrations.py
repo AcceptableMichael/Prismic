@@ -59,9 +59,29 @@ def _migrate_to_1(connection: sqlite3.Connection) -> None:
         connection.execute(statement)
 
 
+# Singleton row (id is always 1) holding the file count from the most
+# recently *completed* scan of this collection -- used as the denominator
+# for a progress indicator on the *next* scan, since a scan in progress has
+# no way to know its own total ahead of time (see ScanStatsRepository).
+_SCHEMA_V2_STATEMENTS = (
+    """
+    CREATE TABLE scan_stats (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        last_file_count INTEGER NOT NULL
+    )
+    """,
+    "INSERT INTO scan_stats (id, last_file_count) VALUES (1, 0)",
+)
+
+
+def _migrate_to_2(connection: sqlite3.Connection) -> None:
+    for statement in _SCHEMA_V2_STATEMENTS:
+        connection.execute(statement)
+
+
 # Ordered by target version: MIGRATIONS[0] takes the schema from 0 to 1, and
 # so on. len(MIGRATIONS) is therefore the current/target schema version.
-MIGRATIONS: list[Migration] = [_migrate_to_1]
+MIGRATIONS: list[Migration] = [_migrate_to_1, _migrate_to_2]
 
 
 def migrate(connection: sqlite3.Connection, database_path: Path) -> None:
