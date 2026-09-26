@@ -76,24 +76,40 @@ class ShuffleButton(_ToggleIconButton):
 
     def _paint_icon(self, painter: QPainter, rect: QRect) -> None:
         x0, y0, x1, y1 = rect.left(), rect.top(), rect.right(), rect.bottom()
-        mid_x = (x0 + x1) / 2
+        # The crossing happens in a shallow band around vertical center --
+        # near-horizontal lines that only dip/rise slightly to swap sides,
+        # like the emoji this glyph stands in for -- rather than each
+        # curve spanning the full icon height, which reads as a tall,
+        # steep X instead of two crossing arrows.
+        band = (y1 - y0) * 0.34
+        y_center = (y0 + y1) / 2
+        near_y = y_center - band
+        far_y = y_center + band
         # A compact, conventional arrowhead -- wings spread wider than the
         # head is deep, like the crossing-arrows emoji this glyph is
         # standing in for, not a long needle poking out past the curve.
-        spread = 3
+        # Narrower than the vertical gap between the two arrows (`band`),
+        # so the two arrowheads' wide ends don't touch each other.
+        spread = 2.5
         length = 3
         shaft_end = x1 - length
+        # The bend itself sits left of center rather than at the true
+        # midpoint -- both control points share this x -- so the crossing
+        # happens early and the curve has already gone most of the way
+        # flat well before it reaches the arrowhead, instead of still
+        # visibly bending right up to where the triangle starts.
+        ctrl_x = x0 + (shaft_end - x0) * 0.35 + 1
 
         # Two S-curves crossing in the middle -- bottom-left to top-right,
         # and top-left to bottom-right -- each with a horizontal tangent
         # at both ends, so the arrowhead below sits flush on a straight
         # approach rather than at an angle.
         upper = QPainterPath()
-        upper.moveTo(x0, y1)
-        upper.cubicTo(mid_x, y1, mid_x, y0, shaft_end, y0)
+        upper.moveTo(x0, far_y)
+        upper.cubicTo(ctrl_x, far_y, ctrl_x, near_y, shaft_end, near_y)
         lower = QPainterPath()
-        lower.moveTo(x0, y0)
-        lower.cubicTo(mid_x, y0, mid_x, y1, shaft_end, y1)
+        lower.moveTo(x0, near_y)
+        lower.cubicTo(ctrl_x, near_y, ctrl_x, far_y, shaft_end, far_y)
         painter.drawPath(upper)
         painter.drawPath(lower)
 
@@ -104,13 +120,13 @@ class ShuffleButton(_ToggleIconButton):
         fill_color = painter.pen().color()
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill_color)
-        for tip_y in (y0, y1):
+        for tip_y in (near_y, far_y):
             painter.drawPolygon(
                 QPolygon(
                     [
-                        QPoint(x1, tip_y),
-                        QPoint(shaft_end, tip_y - spread),
-                        QPoint(shaft_end, tip_y + spread),
+                        QPoint(x1, round(tip_y)),
+                        QPoint(shaft_end, round(tip_y - spread)),
+                        QPoint(shaft_end, round(tip_y + spread)),
                     ]
                 )
             )
