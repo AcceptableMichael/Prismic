@@ -1,0 +1,159 @@
+"""The small toolbar row above the item-tags panel.
+
+Two view toggles that don't belong in the View menu alongside Focus Mode
+and Show Thumbnails, because both are specifically about *this* row's
+neighborhood -- shuffling the very list Focus Mode/thumbnails already
+govern, and a screen-filling mode independent enough from Focus Mode
+(which only hides side panels, keeping the normal window frame) that
+conflating the two would be confusing. See `MainWindow._build_ui` for how
+this row is sized to match the panel title's own height, and
+`MainWindow._apply_shuffle_mode`/`_apply_true_fullscreen` for what the
+two buttons actually do.
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent, QPen, QPolygon
+from PySide6.QtWidgets import QHBoxLayout, QToolButton, QWidget
+
+from prismic.ui import theme
+
+_BUTTON_SIZE = 22
+_ICON_MARGIN = 5
+
+
+class _ToggleIconButton(QToolButton):
+    """A checkable, hand-painted icon button.
+
+    Same "paint it, don't trust an emoji glyph or a bitmap asset"
+    approach `TagRowDelegate` takes for its row icons, so these read as
+    the same visual language rather than a mismatched import. Checked
+    state is colour, not a different icon -- the same accent green
+    everything else in this app already uses for "this is active" (a
+    checked tag's checkbox, a captured shortcut's keycap border), not a
+    swapped glyph.
+
+    No native tooltip: like the viewer's play/pause button (also a plain
+    `QPushButton`/`QToolButton` with no `QAction` behind it), the live
+    keyboard shortcut and description are surfaced through the
+    hover-explainer bar instead -- see `MainWindow._build_status_bar`,
+    which is also where these two get registered with it. A tooltip here
+    would just be a second, easily-stale copy of the same text.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("panelToolbarButton")
+        self.setCheckable(True)
+        self.setFixedSize(_BUTTON_SIZE, _BUTTON_SIZE)
+        # Not part of tab order: neither toggle is something Tab should
+        # land on between the two tag search boxes (see
+        # `MainWindow._cycle_tag_search_focus`), and a mouse hover (for
+        # the explainer bar) or the keyboard shortcut is how either is
+        # discovered/used, not tabbing to it.
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        # The QSS-driven background first (transparent, then a hover/
+        # pressed wash -- see theme.py), so the custom icon on top isn't
+        # the *only* thing responding to the mouse.
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = theme.KEYCAP_BORDER if self.isChecked() else theme.TEXT_SECONDARY
+        painter.setPen(QPen(QColor(color), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        rect = self.rect().adjusted(_ICON_MARGIN, _ICON_MARGIN, -_ICON_MARGIN, -_ICON_MARGIN)
+        self._paint_icon(painter, rect)
+
+    def _paint_icon(self, painter: QPainter, rect: QRect) -> None:
+        raise NotImplementedError
+
+
+class ShuffleButton(_ToggleIconButton):
+    """Two crossing arrows, the conventional "shuffle" glyph (🔀)."""
+
+    def _paint_icon(self, painter: QPainter, rect: QRect) -> None:
+        x0, y0, x1, y1 = rect.left(), rect.top(), rect.right(), rect.bottom()
+        mid_x = (x0 + x1) / 2
+        # A compact, conventional arrowhead -- wings spread wider than the
+        # head is deep, like the crossing-arrows emoji this glyph is
+        # standing in for, not a long needle poking out past the curve.
+        spread = 3
+        length = 3
+        shaft_end = x1 - length
+
+        # Two S-curves crossing in the middle -- bottom-left to top-right,
+        # and top-left to bottom-right -- each with a horizontal tangent
+        # at both ends, so the arrowhead below sits flush on a straight
+        # approach rather than at an angle.
+        upper = QPainterPath()
+        upper.moveTo(x0, y1)
+        upper.cubicTo(mid_x, y1, mid_x, y0, shaft_end, y0)
+        lower = QPainterPath()
+        lower.moveTo(x0, y0)
+        lower.cubicTo(mid_x, y0, mid_x, y1, shaft_end, y1)
+        painter.drawPath(upper)
+        painter.drawPath(lower)
+
+        # A small filled triangle at the right end of each curve, apex
+        # pointing right -- reads far cleaner at this size than two thin
+        # diagonal strokes, which blur into a fuzzy blob once
+        # anti-aliased rather than a crisp arrowhead.
+        fill_color = painter.pen().color()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(fill_color)
+        for tip_y in (y0, y1):
+            painter.drawPolygon(
+                QPolygon(
+                    [
+                        QPoint(x1, tip_y),
+                        QPoint(shaft_end, tip_y - spread),
+                        QPoint(shaft_end, tip_y + spread),
+                    ]
+                )
+            )
+
+
+class FullScreenButton(_ToggleIconButton):
+    """Four corner brackets pointing outward, the conventional
+    "full screen" glyph -- the same shape whether entering or already in
+    full screen, per this widget's own docstring on why checked state is
+    colour only."""
+
+    def _paint_icon(self, painter: QPainter, rect: QRect) -> None:
+        x0, y0, x1, y1 = rect.left(), rect.top(), rect.right(), rect.bottom()
+        arm = max(3, min(rect.width(), rect.height()) // 3)
+        # top-left
+        painter.drawLine(x0, y0 + arm, x0, y0)
+        painter.drawLine(x0, y0, x0 + arm, y0)
+        # top-right
+        painter.drawLine(x1 - arm, y0, x1, y0)
+        painter.drawLine(x1, y0, x1, y0 + arm)
+        # bottom-left
+        painter.drawLine(x0, y1 - arm, x0, y1)
+        painter.drawLine(x0, y1, x0 + arm, y1)
+        # bottom-right
+        painter.drawLine(x1 - arm, y1, x1, y1)
+        painter.drawLine(x1, y1, x1, y1 - arm)
+
+
+class PanelToolbar(QWidget):
+    """The row itself -- just lays the two buttons out flush left. Its
+    height is fixed from the outside (see `MainWindow._build_ui`) to
+    match the panel title above/below it; nothing in here assumes a
+    particular height on its own."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("panelToolbar")
+        self.shuffle_button = ShuffleButton(self)
+        self.fullscreen_button = FullScreenButton(self)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self.shuffle_button)
+        layout.addWidget(self.fullscreen_button)
+        layout.addStretch(1)

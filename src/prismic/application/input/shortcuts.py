@@ -115,6 +115,8 @@ OPEN_SETTINGS = "collection.settings"
 TOGGLE_THUMBNAILS = "view.toggle_thumbnails"
 FOCUS_MODE = "view.focus_mode"
 SWAP_TAG_NUMBERING = "view.swap_tag_numbering"
+SHUFFLE_RESULTS = "view.shuffle_results"
+TRUE_FULLSCREEN = "view.true_fullscreen"
 
 NAVIGATE_PREVIOUS = "navigate.previous"
 NAVIGATE_NEXT = "navigate.next"
@@ -213,6 +215,22 @@ SHORTCUTS: tuple[ShortcutDefinition, ...] = (
         label="Swap which tags are numbered",
         description="Switch the Edit list's numbering between unselected and selected tags",
         default="Ctrl",
+    ),
+    ShortcutDefinition(
+        id=SHUFFLE_RESULTS,
+        category="View",
+        label="Shuffle",
+        description="Randomly reorder the currently filtered items in the results list",
+        default="Ctrl+R",
+    ),
+    ShortcutDefinition(
+        id=TRUE_FULLSCREEN,
+        category="View",
+        label="Full screen",
+        description=(
+            "Fill the whole screen, with no window frame -- any key press or click exits it again"
+        ),
+        default="Ctrl+F",
     ),
     ShortcutDefinition(
         id=NAVIGATE_PREVIOUS,

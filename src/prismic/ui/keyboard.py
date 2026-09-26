@@ -176,6 +176,8 @@ class KeyboardController(QObject):
         on_toggle_tag_shortcut: Callable[[int], None],
         on_toggle_focus_mode: Callable[[], None],
         on_swap_tag_numbering: Callable[[], None],
+        on_shuffle_results: Callable[[], None],
+        on_true_fullscreen: Callable[[], None],
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -195,6 +197,12 @@ class KeyboardController(QObject):
             # every other command. Leaving it out would make it the one
             # shortcut that silently only works on a modifier.
             shortcuts.SWAP_TAG_NUMBERING: on_swap_tag_numbering,
+            # Both toggle a plain QToolButton in `panel_toolbar.py`, not a
+            # QAction -- `on_shuffle_results`/`on_true_fullscreen` are
+            # each that button's own `.toggle()`, so firing the shortcut
+            # and clicking the button end up doing the exact same thing.
+            shortcuts.SHUFFLE_RESULTS: on_shuffle_results,
+            shortcuts.TRUE_FULLSCREEN: on_true_fullscreen,
         }
         # Undo is the one global command with no entry in `SHORTCUTS`:
         # Ctrl+Z is a platform-level editing convention rather than an

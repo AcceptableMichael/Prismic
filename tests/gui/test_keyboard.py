@@ -194,6 +194,88 @@ def test_escape_dismisses_typing_focus_from_either_search_box(
     assert window.result_list.hasFocus()
 
 
+# -- Clicking outside a text input or a button also dismisses typing focus --
+# Real clicks where a real click is safe (nothing it lands on has a side
+# effect of its own); the private method directly where it isn't, per
+# each test's own comment.
+
+
+def test_clicking_blank_panel_space_dismisses_typing_focus(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    """The header (title + search box) has no click handling of its own,
+    so a real click actually lands on it -- exactly the "blank space
+    around 'Edit this file'" case."""
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+
+    qtbot.mouseClick(window.item_tag_panel.header, Qt.MouseButton.LeftButton)
+
+    assert window.result_list.hasFocus()
+
+
+def test_clicking_the_other_panels_blank_space_also_dismisses(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    window.filter_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.filter_panel.search_box.hasFocus(), timeout=1000)
+
+    qtbot.mouseClick(window.filter_panel.header, Qt.MouseButton.LeftButton)
+
+    assert window.result_list.hasFocus()
+
+
+def test_clicking_inside_the_focused_search_box_does_not_dismiss_it(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+
+    qtbot.mouseClick(window.item_tag_panel.search_box, Qt.MouseButton.LeftButton)
+
+    assert window.item_tag_panel.search_box.hasFocus()
+
+
+def test_clicking_the_menu_bar_dismisses_typing_focus(qtbot: QtBot, window: MainWindow) -> None:
+    """The menu bar itself, not one of its menus -- opening File or View
+    for real would block this test in QMenu's own event loop until
+    something dismissed it. `_dismiss_typing_focus_unless_clicking` is
+    called directly instead, with the menu bar as the "clicked" widget,
+    which is exactly what `eventFilter` would have passed it -- Qt
+    delivers a `MouseButtonPress` on the bar itself before ever opening
+    the menu that press was for."""
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+
+    window._dismiss_typing_focus_unless_clicking(window.menuBar())
+
+    assert window.result_list.hasFocus()
+
+
+def test_clicking_a_button_does_not_dismiss_typing_focus(qtbot: QtBot, window: MainWindow) -> None:
+    """A real click on the viewer's play/pause button would actually
+    toggle playback -- an unrelated side effect this test has no reason
+    to trigger, so the private method is exercised directly with that
+    button as the "clicked" widget instead."""
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+
+    window._dismiss_typing_focus_unless_clicking(window.viewer.play_pause_button)
+
+    assert window.item_tag_panel.search_box.hasFocus()
+
+
+def test_clicking_elsewhere_is_a_no_op_when_nothing_is_being_typed_into(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+
+    qtbot.mouseClick(window.item_tag_panel.header, Qt.MouseButton.LeftButton)
+
+    assert window.result_list.hasFocus()  # unaffected, not forced back to itself
+
+
 def test_navigation_still_works_when_the_result_list_has_focus(
     qtbot: QtBot, window: MainWindow
 ) -> None:

@@ -46,8 +46,18 @@ def test_categories_group_contiguously() -> None:
 
 
 def test_defaults_do_not_collide_within_a_scope(bindings: ShortcutBindings) -> None:
+    # Rescan and Shuffle are a known, deliberate exception: both default
+    # to Ctrl+R, at the user's explicit request, on the same "let a
+    # conflict be reported rather than prevented" basis the rest of this
+    # registry already runs on -- Settings surfaces it (see
+    # `test_settings_dialog.py`), it isn't silently resolved here.
+    known_conflicts = {
+        shortcuts.RESCAN: (shortcuts.SHUFFLE_RESULTS,),
+        shortcuts.SHUFFLE_RESULTS: (shortcuts.RESCAN,),
+    }
     for definition in SHORTCUTS:
-        assert bindings.conflicts(definition.id, definition.default) == (), definition.id
+        expected = known_conflicts.get(definition.id, ())
+        assert bindings.conflicts(definition.id, definition.default) == expected, definition.id
 
 
 def test_focus_mode_and_play_pause_share_space_across_scopes(
@@ -59,6 +69,21 @@ def test_focus_mode_and_play_pause_share_space_across_scopes(
     assert bindings.binding(shortcuts.FOCUS_MODE) == "Space"
     assert bindings.binding(shortcuts.VIEWER_PLAY_PAUSE) == "Space"
     assert bindings.conflicts(shortcuts.FOCUS_MODE, "Space") == ()
+
+
+def test_rescan_and_shuffle_share_ctrl_r_as_a_reported_conflict(
+    bindings: ShortcutBindings,
+) -> None:
+    """Unlike Focus Mode/play-pause, this one *is* a same-scope
+    conflict -- both fire a real command on an ordinary keypress, so
+    there's no input-context distinction to resolve it the way scope
+    does for a bare-modifier tap. Left in place anyway, at the user's
+    explicit request: a shortcut's defaults are "a regular input" like
+    any binding a user could type in themselves, reported in Settings
+    rather than silently prevented."""
+    assert bindings.binding(shortcuts.RESCAN) == "Ctrl+R"
+    assert bindings.binding(shortcuts.SHUFFLE_RESULTS) == "Ctrl+R"
+    assert bindings.conflicts(shortcuts.RESCAN, "Ctrl+R") == (shortcuts.SHUFFLE_RESULTS,)
 
 
 def test_every_quick_select_slot_has_a_shortcut(bindings: ShortcutBindings) -> None:
@@ -181,13 +206,17 @@ def test_a_shortcut_can_be_unbound(bindings: ShortcutBindings) -> None:
 
 
 def test_shortcut_for_finds_the_command_a_key_triggers(bindings: ShortcutBindings) -> None:
-    assert bindings.shortcut_for("Ctrl+R") == shortcuts.RESCAN
+    # Settings, not Rescan: its default ("Ctrl+,") isn't shared with
+    # anything else, so freeing it up by rebinding away is unambiguous --
+    # unlike Ctrl+R, which Shuffle still legitimately answers to (see
+    # `test_rescan_and_shuffle_share_ctrl_r_as_a_reported_conflict`).
+    assert bindings.shortcut_for("Ctrl+,") == shortcuts.OPEN_SETTINGS
     assert bindings.shortcut_for("F5") is None
 
-    bindings.set_binding(shortcuts.RESCAN, "F5")
+    bindings.set_binding(shortcuts.OPEN_SETTINGS, "F5")
 
-    assert bindings.shortcut_for("F5") == shortcuts.RESCAN
-    assert bindings.shortcut_for("Ctrl+R") is None
+    assert bindings.shortcut_for("F5") == shortcuts.OPEN_SETTINGS
+    assert bindings.shortcut_for("Ctrl+,") is None
 
 
 def test_shortcut_for_only_searches_the_requested_scope(bindings: ShortcutBindings) -> None:
@@ -202,7 +231,11 @@ def test_conflicts_reports_another_shortcut_on_the_same_key(
 
 
 def test_conflicts_ignores_the_shortcut_being_asked_about(bindings: ShortcutBindings) -> None:
-    assert bindings.conflicts(shortcuts.RESCAN, "Ctrl+R") == ()
+    # Settings again, for the same reason as the test above -- Ctrl+R
+    # would report Shuffle here too now, which is correct but is a
+    # different thing than what this test is pinning (that a shortcut
+    # never reports a conflict against itself).
+    assert bindings.conflicts(shortcuts.OPEN_SETTINGS, "Ctrl+,") == ()
 
 
 def test_a_bare_modifier_is_a_tap_gesture(bindings: ShortcutBindings) -> None:

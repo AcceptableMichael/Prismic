@@ -68,8 +68,12 @@ class TagPanel(QWidget):
         self._delegate.rename_committed.connect(self.rename_requested)
         self.list_view.setItemDelegate(self._delegate)
 
-        title_label = QLabel(title.upper())
-        title_label.setObjectName("panelTitle")
+        # Public rather than a local: `MainWindow` reads this label's own
+        # rendered height to size the shuffle/full-screen toolbar row it
+        # places above the item-tags panel, so that row matches this
+        # box's height exactly rather than a hard-coded guess at it.
+        self.title_label = QLabel(title.upper())
+        self.title_label.setObjectName("panelTitle")
 
         # Title + search box grouped into one widget so the hover-explainer
         # (see HoverHintController in main_window.py) can treat them as a
@@ -80,7 +84,7 @@ class TagPanel(QWidget):
         header_layout = QVBoxLayout(self.header)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(0)
-        header_layout.addWidget(title_label)
+        header_layout.addWidget(self.title_label)
         header_layout.addWidget(self.search_box)
 
         layout = QVBoxLayout(self)
