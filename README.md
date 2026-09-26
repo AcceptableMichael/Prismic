@@ -40,12 +40,10 @@ See [`packaging/README.md`](packaging/README.md) for the full details, but
 in short:
 
 ```powershell
-# 1. Build the self-contained exe
-uv run prismic-build-exe
-
-# 2. Wrap it in a Windows installer (requires Inno Setup:
-#    winget install JRSoftware.InnoSetup)
-uv run prismic-installer
+# Builds the self-contained exe, then also wraps it in a Windows installer
+# if Inno Setup is installed (winget install JRSoftware.InnoSetup) --
+# otherwise stops after the portable exe.
+uv run build
 ```
 
 Output: `dist\PrismicSetup.exe` -- a per-user installer with a Start Menu

@@ -34,7 +34,7 @@ Evaluated PyInstaller, Nuitka, and Briefcase. Picked **PyInstaller**:
 
 ```powershell
 # From the repo root, using the project's normal uv-managed venv:
-uv run prismic-build-exe
+uv run build
 
 # Or, if that fails because another process has the venv's own
 # prismic.exe launcher script locked -- see the note below -- build
@@ -42,18 +42,31 @@ uv run prismic-build-exe
 uv venv .venv-build
 $env:UV_PROJECT_ENVIRONMENT = ".venv-build"
 uv sync --group dev
-prismic-build-exe
+build
 $env:UV_PROJECT_ENVIRONMENT = $null
 ```
 
-`prismic-build-exe` and `prismic-installer` (below) are `[project.scripts]`
+`build` and `prismic-installer` (below) are `[project.scripts]`
 entry points defined in `pyproject.toml`, backed by
 [`src/prismic/_packaging.py`](../src/prismic/_packaging.py) -- uv itself has
 no separate task-runner/scripts feature, but any console-script entry point
 is invocable as `uv run <name>` the same way `uv run prismic` launches the
 app itself. They just wrap the underlying `pyinstaller`/`ISCC.exe`
 invocations shown historically below, so you don't need to remember the
-exact spec path or where Inno Setup installs itself.
+exact spec path or where Inno Setup installs itself. (`uv run build` is
+distinct from `uv`'s own built-in `uv build`, which produces the wheel/sdist
+via the hatchling backend and has nothing to do with PyInstaller -- the
+name similarity is intentional shorthand for "the thing you run to build
+Prismic," not a collision in practice since the two are invoked
+differently.)
+
+`build` runs the whole flow: it builds the exe with PyInstaller, then also
+wraps it into the installer (see "Windows installer" below) if Inno Setup
+is installed. If Inno Setup isn't found, it prints a note and stops after
+the portable exe, rather than failing -- `prismic-installer` is only
+needed on its own if you want to re-wrap an already-built
+`dist\prismic.exe` (e.g. you just installed Inno Setup and don't want to
+rebuild the exe too).
 
 Output: `dist\prismic.exe` -- a single self-contained executable, no
 Python install required on the target machine. ~49MB with UPX compression
