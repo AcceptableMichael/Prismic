@@ -137,7 +137,7 @@ QStatusBar::item {{
    here the whole bar visibly grows/shrinks by a couple of pixels
    every time a hovered control's hint (or the transient message) comes
    and goes. */
-QWidget#hoverExplainerBar, QLabel#transientMessageBar {{
+QWidget#hoverExplainerBar, QLabel#transientMessageBar, QProgressBar#scanProgressBar {{
     min-height: 22px;
 }}
 QLabel#hoverExplainerText {{
@@ -158,6 +158,18 @@ QLabel#transientMessageBar {{
     font-size: 11px;
     padding-right: 4px;
 }}
+QProgressBar#scanProgressBar {{
+    background: {BG_PANEL_RAISED};
+    color: {TEXT_PRIMARY};
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+}}
+QProgressBar#scanProgressBar::chunk {{
+    background: {KEYCAP_BORDER};
+    border-radius: 4px;
+}}
 
 /* -- Panel titles ---------------------------------------------------------- */
 
@@ -167,6 +179,31 @@ QLabel#panelTitle {{
     font-weight: 600;
     padding: 10px 10px 6px 10px;
     letter-spacing: 0.5px;
+}}
+
+/* -- Panel toolbar (shuffle / full screen) ---------------------------------- */
+
+QWidget#panelToolbar {{
+    background: {BG_PANEL};
+    border-bottom: 1px solid {BORDER_SUBTLE};
+}}
+QToolButton#panelToolbarButton {{
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+}}
+QToolButton#panelToolbarButton:hover {{
+    background: {HOVER_WASH};
+}}
+QToolButton#panelToolbarButton:pressed {{
+    background: {PRESSED_WASH};
+}}
+QToolButton#panelToolbarButton::menu-indicator {{
+    /* Qt paints a little drop-down arrow on QToolButton by default even
+       with no menu attached, in some styles -- suppressed since these
+       are plain toggles, not menu buttons. */
+    image: none;
+    width: 0;
 }}
 
 /* -- Buttons ---------------------------------------------------------------- */
@@ -271,11 +308,14 @@ QListView#resultList::item:hover {{
 
 /* -- Splitter --------------------------------------------------------------- */
 
+/* The vertical tag splitter still gets its background from here. The
+   horizontal column splitter (tags|files|viewer) paints its own handle
+   instead, at a fixed width set in code, so it can have a hit area wider
+   than its drawn line (see ui/column_splitter.py) -- the old `width: 1px`
+   rule that used to pin the plain QSplitter's horizontal handle down is
+   gone since it would otherwise fight that width. */
 QSplitter::handle {{
     background: {BORDER_SUBTLE};
-}}
-QSplitter::handle:horizontal {{
-    width: 1px;
 }}
 QSplitter::handle:hover {{
     background: {ACCENT};

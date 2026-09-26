@@ -8,6 +8,7 @@ go through repositories/queries; every mutation goes through
 
 from __future__ import annotations
 
+import random
 from concurrent.futures import Future
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QAction, QCloseEvent, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QApplication,
     QFileDialog,
     QLabel,
@@ -31,6 +33,8 @@ from PySide6.QtWidgets import (
     QMenu,
     QSplitter,
     QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from prismic.application.commands.filter_commands import (
@@ -47,9 +51,11 @@ from prismic.application.input import shortcuts
 from prismic.application.input.shortcuts import ShortcutBindings, keycaps
 from prismic.application.queries.media_query import eligible_media
 from prismic.application.session import PrismicSession
+from prismic.domain.media import Media
 from prismic.domain.tag import Tag
 from prismic.indexing.reconciler import ReconciliationResult
 from prismic.persistence.errors import CollectionLockedError, PersistenceError
+from prismic.ui.column_splitter import ColumnSplitter
 from prismic.ui.frameless_dialog import MessageDialog
 from prismic.ui.future_watcher import FutureWatcher
 from prismic.ui.hover_explainer_bar import HoverExplainerBar
@@ -62,7 +68,9 @@ from prismic.ui.keyboard import (
     literal_character,
     strip_modifier_prefix,
 )
+from prismic.ui.panel_toolbar import PanelToolbar
 from prismic.ui.result_model import MediaIdRole, ResultListModel
+from prismic.ui.scan_progress_bar import ScanProgressBar
 from prismic.ui.settings_dialog import SettingsDialog
 from prismic.ui.tag_model import CheckedRole, CheckedSlotRole, UncheckedSlotRole
 from prismic.ui.tag_panel import TagPanel
@@ -117,6 +125,21 @@ class MainWindow(QMainWindow):
         # add/remove until that file changes.
         self._item_tag_order: list[int] = []
         self._item_tag_order_item_id: int | None = None
+        # See `_apply_shuffle_mode`/`_reordered_by_shuffle`: whether the
+        # result list is currently shuffled, the shuffled arrangement
+        # itself (persists across refreshes rather than being
+        # re-randomized every time), and -- regardless of whether
+        # shuffle is on -- the order `_refresh_all()` actually displayed
+        # last, which is what arrow-key navigation steps through instead
+        # of the domain layer's own always-path-order `result_set`.
+        self._shuffle_enabled = False
+        self._shuffled_order: list[int] = []
+        self._display_order: list[int] = []
+        # See `_apply_true_fullscreen`: the window state from just before
+        # entering full screen, so leaving it can restore *that* --
+        # maximized included -- rather than always landing on plain
+        # windowed, which is what `showNormal()` alone would do.
+        self._pre_fullscreen_state = Qt.WindowState.WindowNoState
 
         self._build_ui()
         self._build_status_bar()
@@ -131,6 +154,8 @@ class MainWindow(QMainWindow):
             on_toggle_tag_shortcut=self._on_toggle_tag_shortcut,
             on_toggle_focus_mode=self._toggle_focus_mode,
             on_swap_tag_numbering=self._toggle_tag_shortcut_mode,
+            on_shuffle_results=self.panel_toolbar.shuffle_button.toggle,
+            on_true_fullscreen=self.panel_toolbar.fullscreen_button.toggle,
             parent=self,
         )
         self._apply_bindings()
@@ -192,6 +217,27 @@ class MainWindow(QMainWindow):
         self._tag_splitter.setSizes([1, 1])
         self._tag_splitter.setHandleWidth(1)
 
+        # Sits above the item-tags panel, not inside it: shuffle and full
+        # screen are both properties of the *browsing session* as a
+        # whole (which items are visible/how much of the screen they get)
+        # rather than of "Edit this file" specifically -- they just have
+        # nowhere else short/wide enough to live without their own menu
+        # entries, which they don't need for two toggles used with the
+        # mouse. Height matched to the title box directly above it in
+        # the same column, queried rather than guessed at, so a font or
+        # padding change to one keeps the other in step automatically.
+        self.panel_toolbar = PanelToolbar()
+        self.panel_toolbar.setFixedHeight(self.item_tag_panel.title_label.sizeHint().height())
+        self.panel_toolbar.shuffle_button.toggled.connect(self._apply_shuffle_mode)
+        self.panel_toolbar.fullscreen_button.toggled.connect(self._apply_true_fullscreen)
+
+        self._left_column = QWidget()
+        left_column_layout = QVBoxLayout(self._left_column)
+        left_column_layout.setContentsMargins(0, 0, 0, 0)
+        left_column_layout.setSpacing(0)
+        left_column_layout.addWidget(self.panel_toolbar)
+        left_column_layout.addWidget(self._tag_splitter, 1)
+
         self.thumbnail_provider = ThumbnailProvider(self)
         self.thumbnail_provider.thumbnail_ready.connect(self._on_thumbnail_ready)
         self.thumbnail_provider.decode_failed.connect(self._on_thumbnail_ready)
@@ -217,12 +263,20 @@ class MainWindow(QMainWindow):
         )
         self.viewer.load_error.connect(self._on_viewer_error)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self._tag_splitter)
+        splitter = ColumnSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self._left_column)
         splitter.addWidget(self.result_list)
         splitter.addWidget(self.viewer)
-        splitter.setSizes([190, 260, 830])
-        splitter.setHandleWidth(1)
+        # The drawn line stays 1px (see ColumnSplitter) but the actual
+        # draggable area is much wider -- anything close to the old 1px
+        # hitbox is too imprecise a mouse target to register as "wider" at
+        # all, let alone easy to grab.
+        splitter.setHandleWidth(20)
+        saved_sizes = QSettings().value("window/columnSplitterSizes")
+        if saved_sizes is not None:
+            splitter.setSizes([int(size) for size in saved_sizes])
+        else:
+            splitter.setSizes([190, 260, 830])
         self._splitter = splitter
 
         self._central_stack = QStackedWidget()
@@ -232,6 +286,7 @@ class MainWindow(QMainWindow):
 
     def _build_status_bar(self) -> None:
         self._hover_bar = HoverExplainerBar()
+        self._scan_progress_bar = ScanProgressBar()
         self._transient_bar = TransientMessageBar()
         # Regular (non-permanent) widget: left-aligned, stretches to fill
         # whatever space the permanent widget on the right doesn't need --
@@ -240,7 +295,10 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self._hover_bar, 1)
         # Permanent: right-aligned, always visible -- this is what
         # replaces QStatusBar's own showMessage() area (see
-        # TransientMessageBar's docstring).
+        # TransientMessageBar's docstring). The scan indicator sits to its
+        # left within that same permanent region, and is hidden except
+        # while a reconciliation is in flight (see _watch_reconciliation).
+        self.statusBar().addPermanentWidget(self._scan_progress_bar)
         self.statusBar().addPermanentWidget(self._transient_bar)
 
         self._hover_hints = HoverHintController(self._hover_bar, self._bindings, self)
@@ -252,6 +310,16 @@ class MainWindow(QMainWindow):
         )
         self._hover_hints.register_widget(
             self.filter_panel.header, shortcuts.FOCUS_TAG_SEARCH, "Cycle between edit and filter"
+        )
+        self._hover_hints.register_widget(
+            self.panel_toolbar.shuffle_button,
+            shortcuts.SHUFFLE_RESULTS,
+            shortcuts.definition(shortcuts.SHUFFLE_RESULTS).description,
+        )
+        self._hover_hints.register_widget(
+            self.panel_toolbar.fullscreen_button,
+            shortcuts.TRUE_FULLSCREEN,
+            shortcuts.definition(shortcuts.TRUE_FULLSCREEN).description,
         )
 
     def _build_menu(self) -> None:
@@ -425,7 +493,7 @@ class MainWindow(QMainWindow):
         self.thumbnail_provider.reset()
 
         try:
-            session = PrismicSession.open(path)
+            session = PrismicSession.open(path, on_progress=self._scan_progress_bar.report_progress)
         except CollectionLockedError as exc:
             # The file lock is authoritative; this is just a best-effort
             # nicety on top of it. If another running instance is
@@ -491,14 +559,19 @@ class MainWindow(QMainWindow):
     def _rescan(self) -> None:
         if self.session is None:
             return
-        self._watch_reconciliation(self.session.rescan())
+        self._watch_reconciliation(
+            self.session.rescan(on_progress=self._scan_progress_bar.report_progress)
+        )
 
     def _watch_reconciliation(self, future: Future[ReconciliationResult]) -> None:
+        self._scan_progress_bar.reset_progress()
+        self._scan_progress_bar.show()
         watcher = FutureWatcher(future, self)
         watcher.finished.connect(self._on_reconciliation_finished)
         self._future_watchers.append(watcher)
 
     def _on_reconciliation_finished(self, _result: object) -> None:
+        self._scan_progress_bar.hide()
         if self.session is None:
             return
         self.session.refresh_state()
@@ -506,6 +579,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         QSettings().setValue("window/geometry", self.saveGeometry())
+        QSettings().setValue("window/columnSplitterSizes", self._splitter.sizes())
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
@@ -532,11 +606,35 @@ class MainWindow(QMainWindow):
         media_list = eligible_media(
             self.session.media, self.session.mappings, self.session.state.selected_tag_ids
         )
+        if self._shuffle_enabled:
+            media_list = self._reordered_by_shuffle(media_list)
+        self._display_order = [media.id for media in media_list]
         self.result_model.set_media(media_list)
 
         self._sync_result_selection()
         self._show_current_media()
         self._refresh_item_tag_panel(tags)
+
+    def _reordered_by_shuffle(self, media_list: list[Media]) -> list[Media]:
+        """`media_list` (in the query layer's own deterministic path
+        order) rearranged per the persistent shuffle order.
+
+        The arrangement itself survives across refreshes rather than
+        being re-randomized every time this runs: an item already placed
+        keeps its slot, one newly eligible is spliced in at a random
+        position, and one no longer eligible just drops out. Only
+        actually toggling shuffle on (`_apply_shuffle_mode`) produces a
+        brand-new random order -- reshuffling on every refresh would make
+        the list visibly jump around on every tag edit, which isn't what
+        "shuffle" means in any player that icon is borrowed from."""
+        by_id = {media.id: media for media in media_list}
+        still_eligible = set(by_id)
+        self._shuffled_order = [i for i in self._shuffled_order if i in still_eligible]
+        placed = set(self._shuffled_order)
+        for media in media_list:
+            if media.id not in placed:
+                self._shuffled_order.insert(random.randint(0, len(self._shuffled_order)), media.id)
+        return [by_id[i] for i in self._shuffled_order]
 
     def _refresh_item_tag_panel(self, tags: list[Tag]) -> None:
         assert self.session is not None
@@ -607,9 +705,13 @@ class MainWindow(QMainWindow):
         almost always keeps going the same way, including holding the key
         down or pressing it faster than one decode takes -- two-ahead is
         what keeps up with that, not just the single immediate neighbor.
+
+        Steps through `self._display_order`, not the domain layer's own
+        `session.state.result_set` -- the two agree exactly unless
+        shuffle is on, in which case this is the one that reflects it.
         """
         assert self.session is not None
-        result_set = self.session.state.result_set
+        result_set = self._display_order
         if current not in result_set:
             return
         index = result_set.index(current)
@@ -635,9 +737,12 @@ class MainWindow(QMainWindow):
         self._refresh_item_tag_panel(self._ordered_tags())
 
     def _navigate(self, delta: int) -> None:
+        """Step `delta` positions through `self._display_order` -- the
+        order actually on screen, which is `session.state.result_set`
+        itself unless shuffle has rearranged it (see `_refresh_all`)."""
         if self.session is None:
             return
-        result_set = self.session.state.result_set
+        result_set = self._display_order
         if not result_set:
             return
         self._nav_direction = 1 if delta >= 0 else -1
@@ -778,14 +883,64 @@ class MainWindow(QMainWindow):
 
         The viewer widget is left alone -- including its own video
         play/pause controls, which stay wherever they'd normally be. This
-        only hides the browsing/tagging chrome around it: the tag panels,
-        the result list, and the menu/status bars.
+        only hides the browsing/tagging chrome around it: the tag panels
+        and their shuffle/full-screen toolbar (`_left_column` wraps both,
+        so hiding it gets the toolbar for free), the result list, and the
+        menu/status bars.
         """
         visible = not checked
-        self._tag_splitter.setVisible(visible)
+        self._left_column.setVisible(visible)
         self.result_list.setVisible(visible)
         self.menuBar().setVisible(visible)
         self.statusBar().setVisible(visible)
+
+    def _apply_shuffle_mode(self, checked: bool) -> None:
+        """Toggle the shuffle button in `panel_toolbar`.
+
+        Turning it on is the one moment a fresh random order gets
+        generated -- from `session.state.result_set` (order doesn't
+        matter, it's about to be shuffled), not from whatever
+        `_shuffled_order` was left over from last time. `_refresh_all`
+        is what actually applies it from here on, incrementally, per
+        `_reordered_by_shuffle`."""
+        self._shuffle_enabled = checked
+        if checked and self.session is not None:
+            self._shuffled_order = list(self.session.state.result_set)
+            random.shuffle(self._shuffled_order)
+        self._refresh_all()
+
+    def _apply_true_fullscreen(self, checked: bool) -> None:
+        """Real, OS-level full screen -- no title bar, no taskbar --
+        independent of Focus Mode, which only hides this window's own
+        side panels while staying a normal window. The two compose: both
+        on at once is as distraction-free as this app gets.
+
+        Getting back out again is handled in `eventFilter`, not here:
+        this method only reacts to the button's own checked state,
+        whichever set it.
+
+        Restoring specifically whatever state preceded full screen --
+        maximized included -- rather than always `showNormal()`: Qt's
+        own `showFullScreen()`/`showNormal()` pair remembers the
+        *geometry* to fall back to (so a plain windowed size/position
+        survives correctly on its own), but not that the window had been
+        maximized. Left to `showNormal()` alone, toggling full screen off
+        would silently un-maximize a window that was maximized before
+        it -- not what "restore ... to the size it was before" means
+        when "before" was maximized.
+        """
+        if checked:
+            self._pre_fullscreen_state = self.windowState()
+            self.showFullScreen()
+            return
+        was_maximized = bool(self._pre_fullscreen_state & Qt.WindowState.WindowMaximized)
+        # Always through Normal first, even when heading straight back to
+        # Maximized: asking to maximize a still-`WindowFullScreen` window
+        # in one step is unreliable (observed silently ignored on
+        # Windows) -- a clean two-step transition is not.
+        self.showNormal()
+        if was_maximized:
+            self.showMaximized()
 
     def _on_toggle_tag_shortcut(self, slot: int) -> None:
         tag_id = self.item_tag_panel.model.tag_id_for_slot(
@@ -830,6 +985,19 @@ class MainWindow(QMainWindow):
             # own QShortcuts under modality; this is the same rule for the
             # shortcuts dispatched by hand below it.)
             return super().eventFilter(watched, event)
+        if self.panel_toolbar.fullscreen_button.isChecked() and event.type() in (
+            QEvent.Type.KeyPress,
+            QEvent.Type.MouseButtonPress,
+        ):
+            # Literally any key or click exits full screen -- not a
+            # specific one (Escape, say) -- per the button's own tooltip.
+            # Swallowed entirely rather than also let through to whatever
+            # it would otherwise have done: "any key gets you out" reads
+            # as its own dedicated gesture, not "exit, and also maybe
+            # toggle thumbnails if it happened to be T."
+            self.panel_toolbar.fullscreen_button.setChecked(False)
+            event.accept()
+            return True
         if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
             if not event.isAutoRepeat():
                 self._keys_down.add(event.key())
@@ -876,6 +1044,7 @@ class MainWindow(QMainWindow):
             # modifier doing something else, same as a modifier+key combo
             # above -- its eventual release isn't a tap.
             self._tap_candidate_key = None
+            self._dismiss_typing_focus_unless_clicking(watched)
         elif event.type() == QEvent.Type.WindowDeactivate:
             # Key releases that happen while another window has focus are
             # never delivered here, so a key held across an alt-tab would
@@ -1012,6 +1181,29 @@ class MainWindow(QMainWindow):
         the result list -- the same "immediately keyboard-driven" default
         focus target `open_collection` sets on startup."""
         self.result_list.setFocus()
+
+    def _dismiss_typing_focus_unless_clicking(self, clicked: QObject) -> None:
+        """A click that lands on neither a text input nor a button leaves
+        typing focus behind -- the blank space around a tag panel's
+        title, a splitter handle, the menu bar, all count as "elsewhere."
+        Clicking a tag row or the result list isn't specifically exempted
+        either; it doesn't need to be, since both already take focus on
+        click via their own strong focus policy, same as this would have
+        landed them at anyway.
+
+        Not consumed -- this only runs alongside whatever the click was
+        actually for (opening a menu, moving focus to a clicked row, ...),
+        never instead of it. `clicked` is `watched` from `eventFilter`:
+        for a `MouseButtonPress`, that's exactly the widget Qt is about
+        to deliver this press to, so an `isinstance` check on it is a
+        direct answer to "what did this click land on," no hit-testing
+        of our own required.
+        """
+        if not self._focus_is_text_editing():
+            return
+        if isinstance(clicked, QLineEdit | QAbstractButton):
+            return
+        self._dismiss_typing_focus()
 
     @staticmethod
     def _focus_is_text_editing() -> bool:

@@ -1,9 +1,11 @@
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QSettings
 from pytestqt.qtbot import QtBot
 
 from prismic.application.commands.mapping_commands import MappingAddCommand
+from prismic.ui.column_splitter import _ColumnSplitterHandle
 from prismic.ui.main_window import MainWindow
 
 
@@ -59,6 +61,52 @@ def test_window_has_title(window: MainWindow) -> None:
     assert window.windowTitle() == "Prismic"
 
 
+def test_column_splitter_handle_hitbox_is_wider_than_its_drawn_line(window: MainWindow) -> None:
+    # The drawn line itself is still 1px -- see column_splitter.py -- but
+    # the draggable area is much wider, so the tags|files and files|viewer
+    # dividers are actually easy to grab with the mouse.
+    assert window._splitter.handleWidth() == 20
+    assert isinstance(window._splitter.handle(1), _ColumnSplitterHandle)
+
+
+def test_column_splitter_sizes_persist_across_windows(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_path = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(
+        "prismic.ui.main_window.QSettings",
+        lambda: QSettings(settings_path, QSettings.Format.IniFormat),
+    )
+
+    first = MainWindow()
+    qtbot.addWidget(first)
+    first._splitter.setSizes([111, 222, 333])
+    first.close()
+
+    # The write side: closing persists whatever sizes() reported right
+    # before close -- not necessarily [111, 222, 333] verbatim, since a
+    # never-shown splitter's setSizes() is only a ratio the real layout
+    # pass (which never ran here) would otherwise reconcile against each
+    # pane's own minimum/size-hint constraints.
+    persisted = QSettings(settings_path, QSettings.Format.IniFormat).value(
+        "window/columnSplitterSizes"
+    )
+    assert [int(size) for size in persisted] == first._splitter.sizes()
+
+    # The read side: a fresh window's splitter is seeded from that
+    # persisted list, not the hardcoded [190, 260, 830] default.
+    captured_sizes: list[list[int]] = []
+    monkeypatch.setattr(
+        "prismic.ui.column_splitter.ColumnSplitter.setSizes",
+        lambda self, sizes: captured_sizes.append(list(sizes)),
+    )
+
+    second = MainWindow()
+    qtbot.addWidget(second)
+
+    assert captured_sizes == [first._splitter.sizes()]
+
+
 def test_starts_with_no_collection_open(window: MainWindow) -> None:
     assert window.session is None
 
@@ -70,6 +118,31 @@ def test_opening_a_collection_populates_the_result_list(
 
     assert window.session is not None
     assert window.result_model.rowCount() == 2
+
+
+def test_scan_progress_bar_is_hidden_once_the_initial_scan_completes(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    _open_and_wait(qtbot, window, collection_dir)
+
+    assert window._scan_progress_bar.isHidden()
+
+
+def test_rescanning_shows_progress_that_reaches_completion(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    _open_and_wait(qtbot, window, collection_dir)
+
+    # Nothing changed on disk, so this rescan has the same 2 files -- and
+    # the previous scan (opening the collection) also saw 2, so this is the
+    # simple case where the progress bar's denominator is exactly right.
+    window._rescan()
+
+    assert window._scan_progress_bar.isVisible()
+    assert window._scan_progress_bar.maximum() == 0  # reset to indeterminate first
+    qtbot.waitUntil(lambda: window._scan_progress_bar.isHidden(), timeout=5000)
+    assert window._scan_progress_bar.maximum() == 2
+    assert window._scan_progress_bar.value() == 2
 
 
 def test_opening_a_bad_collection_shows_an_error_not_a_crash(
