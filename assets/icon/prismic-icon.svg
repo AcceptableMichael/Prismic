@@ -4,7 +4,7 @@
       <polygon points="100,55 58,150 142,150"/>
     </clipPath>
   </defs>
-  <rect x="8" y="8" width="184" height="184" rx="42" fill="#101613" stroke="rgba(255,255,255,0.07)"/>
+  <rect x="8" y="8" width="184" height="184" rx="18.75" fill="#101613"/>
   <g clip-path="url(#prismic-mountain-clip)">
     <polygon points="100,55 58,150 142,150" fill="none" stroke="#EFFFF3" stroke-width="38" opacity="0.10"/>
     <polygon points="100,55 58,150 142,150" fill="none" stroke="#DFFBE6" stroke-width="22" opacity="0.16"/>
