@@ -19,7 +19,8 @@ def test_migrate_creates_schema_from_empty(tmp_path: Path) -> None:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-        assert {"media", "tags", "media_tags"} <= tables
+        expected = {"media", "tags", "media_tags", "tag_correlations", "tag_correlation_stats"}
+        assert expected <= tables
         assert database.schema_version(connection) == len(migrations.MIGRATIONS)
     finally:
         connection.close()

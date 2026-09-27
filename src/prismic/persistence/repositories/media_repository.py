@@ -97,3 +97,7 @@ class MediaRepository:
     def list_all(self) -> list[Media]:
         rows = self._connection.execute("SELECT * FROM media ORDER BY relative_path").fetchall()
         return [_row_to_media(row) for row in rows]
+
+    def count(self) -> int:
+        row = self._connection.execute("SELECT COUNT(*) AS n FROM media").fetchone()
+        return int(row["n"])

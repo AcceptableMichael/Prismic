@@ -54,6 +54,8 @@ from prismic.application.input import shortcuts
 from prismic.application.input.shortcuts import ShortcutBindings, keycaps
 from prismic.application.queries.media_query import eligible_media
 from prismic.application.session import PrismicSession
+from prismic.application.tag_ranking import promote_ranked_tags
+from prismic.application.tag_ranking_settings import TagRankingSettingsStore
 from prismic.domain.media import Media
 from prismic.domain.tag import Tag
 from prismic.indexing.reconciler import ReconciliationResult
@@ -91,13 +93,19 @@ from prismic.ui.viewer import MediaViewer
 
 class MainWindow(QMainWindow):
     def __init__(
-        self, initial_path: Path | None = None, bindings: ShortcutBindings | None = None
+        self,
+        initial_path: Path | None = None,
+        bindings: ShortcutBindings | None = None,
+        tag_ranking_settings: TagRankingSettingsStore | None = None,
     ) -> None:
         super().__init__()
         # Injectable so tests can hand in a store pointed at a temp file
         # instead of writing to (and reading back) the real user-wide
         # preferences file on the machine running them.
         self._bindings = bindings if bindings is not None else ShortcutBindings()
+        self._tag_ranking_settings = (
+            tag_ranking_settings if tag_ranking_settings is not None else TagRankingSettingsStore()
+        )
         self.setWindowTitle("Prismic")
         self.resize(1280, 800)
         saved_geometry = QSettings().value("window/geometry")
@@ -468,8 +476,11 @@ class MainWindow(QMainWindow):
         return self._bindings
 
     def open_settings(self) -> None:
-        dialog = SettingsDialog(self._bindings, self)
+        dialog = SettingsDialog(
+            self._bindings, self, tag_ranking_settings=self._tag_ranking_settings
+        )
         dialog.bindings_changed.connect(self._apply_bindings)
+        dialog.tag_ranking_changed.connect(self._refresh_all)
         dialog.exec()
 
     def _apply_bindings(self) -> None:
@@ -717,15 +728,16 @@ class MainWindow(QMainWindow):
         assert self.session is not None
         selected = self._selection_or_current()
         if not selected:
-            self.item_tag_panel.set_tags(tags, frozenset())
+            self.item_tag_panel.set_tags(self._promote_tags(tags, frozenset()), frozenset())
             self._item_tag_order = []
             self._item_tag_order_item_id = None
             return
         if len(selected) == 1:
             current = next(iter(selected))
             mapped_ids = frozenset(t.id for t in self.session.mappings.tags_for_media(current))
+            promoted = self._promote_tags(tags, mapped_ids)
             self.item_tag_panel.set_tags(
-                self._stable_item_tags(tags, mapped_ids, current), mapped_ids
+                self._stable_item_tags(promoted, mapped_ids, current), mapped_ids
             )
             return
         # Multi-select: "checked" means every selected file has the tag
@@ -738,7 +750,30 @@ class MainWindow(QMainWindow):
         self._item_tag_order = []
         self._item_tag_order_item_id = None
         common_ids = self._common_tag_ids(selected)
-        self.item_tag_panel.set_tags(tags, common_ids)
+        self.item_tag_panel.set_tags(self._promote_tags(tags, common_ids), common_ids)
+
+    def _promote_tags(self, tags: list[Tag], checked_ids: frozenset[int]) -> list[Tag]:
+        """`tags` with "mega popular" and correlated-with-a-checked-tag
+        candidates promoted to the top of its unchecked portion -- the
+        item tag panel's own ranking, on top of (never touching) the
+        recency/popularity order `tags` already comes in. Deliberately
+        scoped to the item tag panel only, not the browse filter panel --
+        the filter panel is what you use to explore what's already
+        tagged, while this panel is where "what should I check next on
+        this file" actually matters.
+        """
+        assert self.session is not None
+        settings = self._tag_ranking_settings.load()
+        self.session.tag_correlations.ensure_fresh()
+        return promote_ranked_tags(
+            tags,
+            checked_ids,
+            mega_popular_ids=self.session.tags.mega_popular_tag_ids(
+                settings.mega_popular_threshold, self.session.media.count()
+            ),
+            correlations=self.session.tag_correlations.best_correlations_from(checked_ids),
+            correlation_threshold=settings.correlation_threshold,
+        )
 
     def _common_tag_ids(self, media_ids: frozenset[int]) -> frozenset[int]:
         assert self.session is not None

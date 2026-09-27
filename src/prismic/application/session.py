@@ -32,6 +32,7 @@ from prismic.persistence.collection import OpenCollection, open_collection
 from prismic.persistence.repositories.mapping_repository import MappingRepository
 from prismic.persistence.repositories.media_repository import MediaRepository
 from prismic.persistence.repositories.scan_stats_repository import ScanStatsRepository
+from prismic.persistence.repositories.tag_correlation_repository import TagCorrelationRepository
 from prismic.persistence.repositories.tag_repository import TagRepository
 
 
@@ -53,6 +54,7 @@ class PrismicSession:
         self.tags = TagRepository(opened.connection)
         self.media = MediaRepository(opened.connection)
         self.mappings = MappingRepository(opened.connection)
+        self.tag_correlations = TagCorrelationRepository(opened.connection)
         self.state = ApplicationState()
         self.tag_recency = TagRecencyTracker()
         self.history = History()

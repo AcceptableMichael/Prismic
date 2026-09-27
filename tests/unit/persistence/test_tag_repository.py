@@ -108,3 +108,34 @@ def test_list_all_is_ordered_by_descending_use_count(
     )
 
     assert [tag.name for tag in repository.list_all()] == ["popular", "rare", "unused"]
+
+
+def test_mega_popular_tag_ids_uses_the_same_use_count_basis_as_list_all(
+    repository: TagRepository, migrated_connection: sqlite3.Connection
+) -> None:
+    mega = repository.create("mega")
+    rare = repository.create("rare")
+
+    for path in ("a.jpg", "b.jpg", "c.jpg", "d.jpg"):
+        migrated_connection.execute(
+            "INSERT INTO media (content_hash, relative_path, size, mtime, state) "
+            "VALUES ('h', ?, 0, 0, 'active')",
+            (path,),
+        )
+    media_ids = [row[0] for row in migrated_connection.execute("SELECT id FROM media").fetchall()]
+    # mega: 3 of 4 files (75%), rare: 1 of 4 (25%).
+    migrated_connection.executemany(
+        "INSERT INTO media_tags (media_id, tag_id) VALUES (?, ?)",
+        [(media_ids[0], rare.id), *((mid, mega.id) for mid in media_ids[:3])],
+    )
+
+    assert repository.mega_popular_tag_ids(0.5, total_media_count=4) == frozenset({mega.id})
+    assert repository.mega_popular_tag_ids(0.1, total_media_count=4) == frozenset(
+        {mega.id, rare.id}
+    )
+
+
+def test_mega_popular_tag_ids_is_empty_with_no_media(repository: TagRepository) -> None:
+    repository.create("mega")
+
+    assert repository.mega_popular_tag_ids(0.1, total_media_count=0) == frozenset()

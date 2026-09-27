@@ -50,8 +50,9 @@ def accept_all(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_the_dialog_has_a_shortcuts_panel(dialog: SettingsDialog) -> None:
-    assert dialog.panel_list.count() == 1
+    assert dialog.panel_list.count() == 2
     assert dialog.panel_list.item(0).text() == "Shortcuts"
+    assert dialog.panel_list.item(1).text() == "Tag ranking"
 
 
 def test_every_registered_shortcut_gets_a_row(dialog: SettingsDialog) -> None:

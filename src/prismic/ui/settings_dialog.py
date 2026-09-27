@@ -1,8 +1,8 @@
 """The Settings window.
 
-One panel so far -- Shortcuts -- but built as a sidebar-plus-stack rather
-than a bare list, so a second panel is an `addWidget` and a list row
-rather than a rewrite of the window around it.
+Two panels -- Shortcuts and Tag ranking -- built as a sidebar-plus-stack
+rather than a bare list, so a further panel is an `addWidget` and a list
+row rather than a rewrite of the window around it.
 
 The shortcut list is generated from `SHORTCUTS` in
 `application/input/shortcuts.py`, in the order declared there, grouped by
@@ -25,7 +25,7 @@ window raises (`_confirm_conflicts`, `_restore_defaults`).
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QFocusEvent, QHideEvent, QKeyEvent
+from PySide6.QtGui import QFocusEvent, QHideEvent, QIntValidator, QKeyEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -53,6 +53,13 @@ from prismic.application.input.shortcuts import (
 from prismic.application.input.shortcuts import (
     definition as shortcut_definition,
 )
+from prismic.application.tag_ranking_settings import (
+    DEFAULT_CORRELATION_THRESHOLD,
+    DEFAULT_MEGA_POPULAR_THRESHOLD,
+    TagRankingSettings,
+    TagRankingSettingsStore,
+)
+from prismic.persistence.repositories.tag_correlation_repository import DEFAULT_MIN_COOCCURRENCE
 from prismic.ui.frameless_dialog import FramelessDialog, MessageDialog
 from prismic.ui.keyboard import MODIFIER_KEY_NAMES, key_text
 
@@ -482,25 +489,182 @@ class ShortcutsPanel(QWidget):
         self._on_row_changed()
 
 
+class ThresholdRow(QWidget):
+    """One percentage setting: what it does on the left, an editable
+    percentage field and a reset-to-default button on the right -- the
+    same left-text/right-controls shape as `ShortcutRow`, minus the
+    capture-a-key machinery a plain percentage doesn't need."""
+
+    changed = Signal()
+
+    def __init__(
+        self,
+        label: str,
+        description: str,
+        *,
+        default_fraction: float,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("shortcutRow")
+        self._default_fraction = default_fraction
+        self._fraction = default_fraction
+
+        text_label = QLabel(label)
+        text_label.setObjectName("shortcutLabel")
+        text_description = QLabel(description)
+        text_description.setObjectName("shortcutDescription")
+        text_description.setWordWrap(True)
+        text_column = QVBoxLayout()
+        text_column.setContentsMargins(0, 0, 0, 0)
+        text_column.setSpacing(2)
+        text_column.addWidget(text_label)
+        text_column.addWidget(text_description)
+
+        self._editor = QLineEdit(self)
+        self._editor.setValidator(QIntValidator(1, 100, self))
+        self._editor.setFixedWidth(50)
+        self._editor.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._editor.editingFinished.connect(self._commit)
+        percent_sign = QLabel("%", self)
+
+        self._reset_button = QPushButton("Reset", self)
+        self._reset_button.setObjectName("shortcutSmallButton")
+        self._reset_button.clicked.connect(self._reset)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(10)
+        layout.addLayout(text_column, 1)
+        layout.addWidget(self._editor)
+        layout.addWidget(percent_sign)
+        layout.addWidget(self._reset_button)
+
+        self.refresh()
+
+    @property
+    def fraction(self) -> float:
+        return self._fraction
+
+    def set_fraction(self, fraction: float) -> None:
+        self._fraction = fraction
+        self.refresh()
+
+    def refresh(self) -> None:
+        self._editor.setText(str(round(self._fraction * 100)))
+        self._reset_button.setEnabled(self._fraction != self._default_fraction)
+
+    def _commit(self) -> None:
+        text = self._editor.text()
+        fraction = (int(text) if text else round(self._fraction * 100)) / 100
+        if fraction == self._fraction:
+            self.refresh()
+            return
+        self._fraction = fraction
+        self.refresh()
+        self.changed.emit()
+
+    def _reset(self) -> None:
+        if self._fraction == self._default_fraction:
+            return
+        self._fraction = self._default_fraction
+        self.refresh()
+        self.changed.emit()
+
+
+class TagRankingPanel(QWidget):
+    """The two thresholds behind the item tag panel's "check this next"
+    promotion (see `application.tag_ranking.promote_ranked_tags`):
+    correlated tags and mega-popular tags. Persists itself the same way
+    `ShortcutsPanel` does -- through the store it's handed, on every
+    change, rather than waiting for the dialog to be closed."""
+
+    changed = Signal()
+
+    def __init__(self, store: TagRankingSettingsStore, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._store = store
+        settings = store.load()
+
+        header = QLabel("TAG RANKING")
+        header.setObjectName("panelTitle")
+
+        self.correlation_row = ThresholdRow(
+            "Correlated tags",
+            "In the item tag panel, a tag that usually appears alongside a "
+            "tag you've already checked is promoted to the top of the "
+            "unchecked list. \"Usually\" means at least this percentage of "
+            "the checked tag's files also carry the other one, counted only "
+            f"once both tags appear together on at least {DEFAULT_MIN_COOCCURRENCE} files.",
+            default_fraction=DEFAULT_CORRELATION_THRESHOLD,
+            parent=self,
+        )
+        self.correlation_row.set_fraction(settings.correlation_threshold)
+        self.correlation_row.changed.connect(self._on_row_changed)
+
+        self.mega_popular_row = ThresholdRow(
+            "Mega-popular tags",
+            "A tag used on at least this percentage of the entire "
+            "collection is promoted to the very top of the item tag "
+            "panel's unchecked list, regardless of what's already checked.",
+            default_fraction=DEFAULT_MEGA_POPULAR_THRESHOLD,
+            parent=self,
+        )
+        self.mega_popular_row.set_fraction(settings.mega_popular_threshold)
+        self.mega_popular_row.changed.connect(self._on_row_changed)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(0)
+        layout.addWidget(header)
+        layout.addWidget(self.mega_popular_row)
+        layout.addWidget(self.correlation_row)
+        layout.addStretch(1)
+
+    def _on_row_changed(self) -> None:
+        self._store.save(
+            TagRankingSettings(
+                correlation_threshold=self.correlation_row.fraction,
+                mega_popular_threshold=self.mega_popular_row.fraction,
+            )
+        )
+        self.changed.emit()
+
+
 class SettingsDialog(FramelessDialog):
     bindings_changed = Signal()
+    tag_ranking_changed = Signal()
 
-    def __init__(self, bindings: ShortcutBindings, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        bindings: ShortcutBindings,
+        parent: QWidget | None = None,
+        *,
+        tag_ranking_settings: TagRankingSettingsStore | None = None,
+    ) -> None:
         super().__init__("Settings", parent, resizable=True)
         self.resize(760, 620)
 
         self.shortcuts_panel = ShortcutsPanel(bindings, self)
         self.shortcuts_panel.changed.connect(self.bindings_changed)
 
+        self.tag_ranking_panel = TagRankingPanel(
+            tag_ranking_settings if tag_ranking_settings is not None else TagRankingSettingsStore(),
+            self,
+        )
+        self.tag_ranking_panel.changed.connect(self.tag_ranking_changed)
+
         self.panel_list = QListWidget(self)
         self.panel_list.setObjectName("settingsPanelList")
         self.panel_list.addItem("Shortcuts")
+        self.panel_list.addItem("Tag ranking")
         self.panel_list.setCurrentRow(0)
         self.panel_list.setFixedWidth(150)
         self.panel_list.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
         self._stack = QStackedWidget(self)
         self._stack.addWidget(self.shortcuts_panel)
+        self._stack.addWidget(self.tag_ranking_panel)
         self.panel_list.currentRowChanged.connect(self._stack.setCurrentIndex)
 
         self.title_bar.close_requested.connect(self.accept)

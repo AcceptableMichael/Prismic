@@ -61,3 +61,25 @@ class TagRepository:
             """
         ).fetchall()
         return [Tag(id=row["id"], name=row["name"]) for row in rows]
+
+    def mega_popular_tag_ids(self, min_fraction: float, total_media_count: int) -> frozenset[int]:
+        """Ids of tags present on at least `min_fraction` of all media --
+        the "mega popular" promotion tier, same use-count basis
+        `list_all()` orders by (every mapping counted, regardless of
+        whether that media is currently active on disk), so a tag ranking
+        highest under the everyday popularity order and one qualifying
+        here never disagree over what "popular" means.
+        """
+        if total_media_count <= 0:
+            return frozenset()
+        rows = self._connection.execute(
+            """
+            SELECT tags.id AS id, COUNT(media_tags.media_id) AS use_count
+            FROM tags
+            LEFT JOIN media_tags ON media_tags.tag_id = tags.id
+            GROUP BY tags.id
+            """
+        ).fetchall()
+        return frozenset(
+            row["id"] for row in rows if row["use_count"] / total_media_count >= min_fraction
+        )

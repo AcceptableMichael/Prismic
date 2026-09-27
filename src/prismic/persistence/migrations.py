@@ -79,9 +79,45 @@ def _migrate_to_2(connection: sqlite3.Connection) -> None:
         connection.execute(statement)
 
 
+# `tag_correlations` is a materialized, directional (tag_x_id -> tag_y_id)
+# cache of how often two tags co-occur, rebuilt wholesale by
+# `TagCorrelationRepository.recompute()` rather than kept incrementally in
+# sync with every tag/mapping change -- see that class for why. Raw counts
+# are stored (not a precomputed ratio/threshold decision) so a later change
+# to the correlation-percentage setting takes effect immediately, without
+# needing a recompute of its own.
+#
+# `tag_correlation_stats` is a `scan_stats`-style singleton row recording
+# when that cache was last rebuilt, so a caller can throttle how often a
+# full recompute happens without needing its own separate persistence.
+_SCHEMA_V3_STATEMENTS = (
+    """
+    CREATE TABLE tag_correlations (
+        tag_x_id INTEGER NOT NULL REFERENCES tags(id),
+        tag_y_id INTEGER NOT NULL REFERENCES tags(id),
+        both_count INTEGER NOT NULL,
+        x_count INTEGER NOT NULL,
+        PRIMARY KEY (tag_x_id, tag_y_id)
+    )
+    """,
+    """
+    CREATE TABLE tag_correlation_stats (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        computed_at REAL
+    )
+    """,
+    "INSERT INTO tag_correlation_stats (id, computed_at) VALUES (1, NULL)",
+)
+
+
+def _migrate_to_3(connection: sqlite3.Connection) -> None:
+    for statement in _SCHEMA_V3_STATEMENTS:
+        connection.execute(statement)
+
+
 # Ordered by target version: MIGRATIONS[0] takes the schema from 0 to 1, and
 # so on. len(MIGRATIONS) is therefore the current/target schema version.
-MIGRATIONS: list[Migration] = [_migrate_to_1, _migrate_to_2]
+MIGRATIONS: list[Migration] = [_migrate_to_1, _migrate_to_2, _migrate_to_3]
 
 
 def migrate(connection: sqlite3.Connection, database_path: Path) -> None:
