@@ -31,6 +31,7 @@ from prismic.persistence import database
 from prismic.persistence.collection import OpenCollection, open_collection
 from prismic.persistence.repositories.mapping_repository import MappingRepository
 from prismic.persistence.repositories.media_repository import MediaRepository
+from prismic.persistence.repositories.scan_stats_repository import ScanStatsRepository
 from prismic.persistence.repositories.tag_repository import TagRepository
 
 
@@ -62,6 +63,15 @@ class PrismicSession:
         self.worker_pool = WorkerPool()
         self.state.recompute(self.media, self.mappings)
 
+        # Whether the scan this constructor is about to kick off is this
+        # root's very first (no `scan_stats` row written yet, so a stale
+        # progress denominator would be misleadingly "0 of 0" rather than
+        # meaningfully absent) -- read synchronously, strictly before
+        # `_scan_in_background` ever starts the worker thread that would
+        # eventually overwrite it, so there's no race to get this wrong.
+        # `rescan()` recomputes it the same way before every later scan too,
+        # so it always reflects whichever scan is currently in flight.
+        self.is_first_scan = self._compute_is_first_scan()
         self.initial_reconciliation: Future[ReconciliationResult] = self._scan_in_background(
             on_progress
         )
@@ -105,6 +115,7 @@ class PrismicSession:
         a caller that needs it on the GUI thread must marshal it itself,
         the same way `FutureWatcher` marshals the future's completion.
         """
+        self.is_first_scan = self._compute_is_first_scan()
         return self._scan_in_background(on_progress)
 
     def refresh_state(self) -> None:
@@ -115,6 +126,12 @@ class PrismicSession:
         discovered/changed/missing media is reflected in the result set.
         """
         self.state.recompute(self.media, self.mappings)
+
+    def _compute_is_first_scan(self) -> bool:
+        """Whether `scan_stats` holds no count yet, i.e. this root has never
+        completed a scan -- read on the main thread, from the main-thread
+        connection, never the background worker's own."""
+        return ScanStatsRepository(self._opened.connection).get_last_file_count() == 0
 
     def _scan_in_background(
         self, on_progress: ProgressCallback | None

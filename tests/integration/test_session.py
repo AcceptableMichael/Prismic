@@ -50,6 +50,26 @@ def test_rescan_returns_a_future_and_keeps_the_database_consistent(tmp_path: Pat
         assert [m.relative_path for m in session.media.list_all()] == ["new.jpg"]
 
 
+def test_is_first_scan_is_true_until_the_initial_scan_completes_then_false(
+    tmp_path: Path,
+) -> None:
+    collection_root = tmp_path / "vacation"
+    collection_root.mkdir()
+    (collection_root / "a.jpg").write_bytes(b"content")
+
+    with PrismicSession.open(collection_root) as session:
+        # True from construction -- read synchronously before the
+        # background scan could possibly have written a count back.
+        assert session.is_first_scan is True
+
+        session.initial_reconciliation.result(timeout=5)
+
+        (collection_root / "b.jpg").write_bytes(b"more content")
+        session.rescan().result(timeout=5)
+
+        assert session.is_first_scan is False
+
+
 def test_close_leaves_no_lingering_lock_for_a_subsequent_open(tmp_path: Path) -> None:
     collection_root = tmp_path / "vacation"
     collection_root.mkdir()

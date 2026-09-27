@@ -6,12 +6,22 @@ Sits alongside `TransientMessageBar` in the same permanent area, opposite
 presentational: `MainWindow` shows it when it starts watching a
 reconciliation future, hides it once that future completes, and feeds it
 progress via `report_progress()` in between.
+
+The label itself reflects whether the collection has ever been scanned
+before -- see `reset_progress(is_first_scan=...)`, fed from
+`PrismicSession.is_first_scan`. A brand-new root has nothing to compare
+against yet (there's no "moved" or "changed" to detect relative to a
+previous pass), so it reads "Scanning all files" instead of the usual
+"Detecting any moved files".
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QProgressBar, QWidget
+
+_FIRST_SCAN_FORMAT = "Scanning all files"
+_LATER_SCAN_FORMAT = "Detecting any moved files"
 
 
 class ScanProgressBar(QProgressBar):
@@ -27,22 +37,22 @@ class ScanProgressBar(QProgressBar):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("scanProgressBar")
-        self.setFormat("Detecting any moved files")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setTextVisible(True)
         self.setFixedWidth(300)
         self._progress.connect(self._apply_progress)
-        self.reset_progress()
+        self.reset_progress(is_first_scan=False)
         self.hide()
 
     def report_progress(self, processed: int, expected_total: int) -> None:
         self._progress.emit(processed, expected_total)
 
-    def reset_progress(self) -> None:
+    def reset_progress(self, *, is_first_scan: bool = False) -> None:
         # No count yet (the very first scan of a collection, before any
         # scan has completed to leave a total behind) -- min == max == 0 is
         # Qt's own convention for an indeterminate/busy progress bar, so
         # this falls back to that rather than a misleading "0 of 0" full bar.
+        self.setFormat(_FIRST_SCAN_FORMAT if is_first_scan else _LATER_SCAN_FORMAT)
         self.setRange(0, 0)
         self.setValue(0)
 

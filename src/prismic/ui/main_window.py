@@ -542,7 +542,9 @@ class MainWindow(QMainWindow):
         self._instance_bridge.take_ownership(session.collection.database_path)
         self.setWindowTitle(f"Prismic — {session.collection.root.name}")
         self._central_stack.setCurrentWidget(self._splitter)
-        self._watch_reconciliation(session.initial_reconciliation)
+        self._watch_reconciliation(
+            session.initial_reconciliation, is_first_scan=session.is_first_scan
+        )
         self._refresh_all()
         # Two persistent QLineEdits (the tag search boxes) now live in the
         # main window's own widget tree rather than only inside transient
@@ -576,12 +578,13 @@ class MainWindow(QMainWindow):
     def _rescan(self) -> None:
         if self.session is None:
             return
-        self._watch_reconciliation(
-            self.session.rescan(on_progress=self._scan_progress_bar.report_progress)
-        )
+        future = self.session.rescan(on_progress=self._scan_progress_bar.report_progress)
+        self._watch_reconciliation(future, is_first_scan=self.session.is_first_scan)
 
-    def _watch_reconciliation(self, future: Future[ReconciliationResult]) -> None:
-        self._scan_progress_bar.reset_progress()
+    def _watch_reconciliation(
+        self, future: Future[ReconciliationResult], *, is_first_scan: bool
+    ) -> None:
+        self._scan_progress_bar.reset_progress(is_first_scan=is_first_scan)
         self._scan_progress_bar.show()
         watcher = FutureWatcher(future, self)
         watcher.finished.connect(self._on_reconciliation_finished)
