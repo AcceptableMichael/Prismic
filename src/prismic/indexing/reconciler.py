@@ -18,17 +18,19 @@ matching one file) is just as unsafe to guess at, so it's held to the same
 
 from __future__ import annotations
 
+import queue
 import sqlite3
 import threading
 from collections import defaultdict
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 
 from prismic.domain.collection import Collection
 from prismic.domain.media import Media, MediaState
 from prismic.indexing.hashing import hash_file
-from prismic.indexing.scanner import scan
+from prismic.indexing.scanner import ScannedFile, scan
 from prismic.persistence.repositories.media_repository import MediaRepository
 from prismic.persistence.repositories.scan_stats_repository import ScanStatsRepository
 
@@ -45,10 +47,13 @@ __all__ = [
     "ReconciliationResult",
     "hash_file",
     "run_reconciliation",
+    "scan",
 ]
-# `hash_file` is re-exported (not just imported for internal use) so tests
-# can monkeypatch `prismic.indexing.reconciler.hash_file` specifically to
-# simulate a file disappearing between the scan and the hash.
+# `hash_file` and `scan` are re-exported (not just imported for internal
+# use) so tests can monkeypatch `prismic.indexing.reconciler.hash_file`/
+# `.scan` specifically -- to simulate a file disappearing between the scan
+# and the hash, and to prove hashing starts before the walk finishes,
+# respectively.
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,6 +286,19 @@ def run_reconciliation(
     `reconcile()` call below) stays single-threaded -- it's a sequence of
     dependent SQLite writes under one transaction, not an independent-unit
     workload like hashing is.
+
+    Hashing is submitted to the pool *while still walking the tree*, not
+    only once the whole walk finishes: each file goes to a worker the
+    moment `scan()` yields it, so the pool is already chewing through
+    early files well before `scan()` itself returns. Without this, a slow
+    walk (a large root, especially over a network share) would leave
+    `on_progress` completely silent until the walk finished, no matter how
+    fast hashing itself later turned out to be -- the whole point of a
+    progress indicator is to move throughout the pass, not sit frozen for
+    its first phase and then race through the second. Completed hashes are
+    drained from a queue (fed by each future's `add_done_callback`, which
+    fires on whichever worker thread finished it) opportunistically
+    between submissions, and to completion once the walk itself is done.
     """
     stats_repository = ScanStatsRepository(connection)
     expected_total = stats_repository.get_last_file_count()
@@ -288,30 +306,53 @@ def run_reconciliation(
     hashed_files: list[HashedFile] = []
     unreadable_paths: set[str] = set()
     processed = 0
+    submitted = 0
+
+    # (scanned_file, its now-finished future) pairs, pushed by whichever
+    # thread finishes each hash -- a plain `Queue` rather than shared state
+    # plus a lock, so the only code that ever touches `hashed_files`/
+    # `unreadable_paths`/`processed` above runs on this thread.
+    completed: queue.Queue[tuple[ScannedFile, Future[str]]] = queue.Queue()
+
+    def _on_done(scanned_file: ScannedFile, future: Future[str]) -> None:
+        completed.put((scanned_file, future))
+
+    def _apply(scanned_file: ScannedFile, future: Future[str]) -> None:
+        nonlocal processed
+        try:
+            content_hash = future.result()
+        except OSError:
+            unreadable_paths.add(scanned_file.relative_path)
+        else:
+            hashed_files.append(
+                HashedFile(
+                    relative_path=scanned_file.relative_path,
+                    content_hash=content_hash,
+                    size=scanned_file.size,
+                    mtime=scanned_file.mtime,
+                )
+            )
+        processed += 1
+        if on_progress is not None:
+            on_progress(processed, expected_total)
+
+    def _drain_ready() -> None:
+        """Apply every hash that's already finished, without blocking."""
+        while True:
+            try:
+                scanned_file, future = completed.get_nowait()
+            except queue.Empty:
+                return
+            _apply(scanned_file, future)
 
     with ThreadPoolExecutor(thread_name_prefix="prismic-hash") as executor:
-        futures = {
-            executor.submit(hash_file, scanned_file.absolute_path): scanned_file
-            for scanned_file in scan(collection)
-        }
-        for future in as_completed(futures):
-            scanned_file = futures[future]
-            try:
-                content_hash = future.result()
-            except OSError:
-                unreadable_paths.add(scanned_file.relative_path)
-            else:
-                hashed_files.append(
-                    HashedFile(
-                        relative_path=scanned_file.relative_path,
-                        content_hash=content_hash,
-                        size=scanned_file.size,
-                        mtime=scanned_file.mtime,
-                    )
-                )
-            processed += 1
-            if on_progress is not None:
-                on_progress(processed, expected_total)
+        for scanned_file in scan(collection):
+            future = executor.submit(hash_file, scanned_file.absolute_path)
+            future.add_done_callback(partial(_on_done, scanned_file))
+            submitted += 1
+            _drain_ready()
+        while processed < submitted:
+            _apply(*completed.get())
 
     stats_repository.set_last_file_count(processed)
 

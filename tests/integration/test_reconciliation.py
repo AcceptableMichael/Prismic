@@ -293,6 +293,47 @@ def test_hashing_runs_multiple_files_concurrently(
     _run(reconciler, collection, migrated_connection)  # must not time out
 
 
+def test_hashing_starts_before_the_walk_finishes(
+    collection: Collection,
+    reconciler: Reconciler,
+    migrated_connection: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A progress indicator that sits frozen until the whole tree is
+    walked, then races through hashing, isn't a progress indicator for the
+    walk itself -- on a slow walk (a large root, a network share), hashing
+    must already be under way *while still walking*, not only start once
+    `scan()` is exhausted. Proven directly: a stand-in `scan()` yields one
+    file, then blocks until that file's hash has demonstrably started on a
+    worker thread before yielding the rest -- which only clears if
+    submission and walking are interleaved, not sequential phases."""
+    import threading
+
+    import prismic.indexing.reconciler as reconciler_module
+
+    (collection.root / "a.jpg").write_bytes(b"a")
+    (collection.root / "b.jpg").write_bytes(b"b")
+
+    hash_started = threading.Event()
+    real_hash_file = reconciler_module.hash_file
+    real_scan = reconciler_module.scan
+
+    def _hash_file_signaling_start(path: object) -> str:
+        hash_started.set()
+        return real_hash_file(path)  # type: ignore[arg-type]
+
+    def _scan_blocking_after_first(collection_: Collection):  # type: ignore[no-untyped-def]
+        iterator = iter(real_scan(collection_))
+        yield next(iterator)
+        assert hash_started.wait(timeout=5), "hashing never started before the walk continued"
+        yield from iterator
+
+    monkeypatch.setattr(reconciler_module, "hash_file", _hash_file_signaling_start)
+    monkeypatch.setattr(reconciler_module, "scan", _scan_blocking_after_first)
+
+    _run(reconciler, collection, migrated_connection)  # must not hang/time out
+
+
 def test_reconciliation_can_run_on_a_separate_connection_to_the_same_file(
     tmp_path: Path,
 ) -> None:
