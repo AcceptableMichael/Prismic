@@ -34,7 +34,7 @@ import math
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent
 from PySide6.QtWidgets import QWidget
 
@@ -108,14 +108,26 @@ class SelectionGridView(QWidget):
         is_video = path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS
 
         if pixmap is not None:
+            ratio = self.devicePixelRatioF()
+            # Scale to the cell's *physical* pixel size (logical size times
+            # DPI ratio), not `rect.size()` (logical) directly -- scaling
+            # straight to logical size would throw away exactly the extra
+            # resolution `_required_dimension` decoded for on a >1x display,
+            # producing a pixmap Qt then has to re-stretch to fill the same
+            # physical area, blurring it right back out. Setting the result's
+            # own `devicePixelRatio` is what tells Qt those extra pixels are
+            # real detail, not something to stretch.
+            physical_size = (rect.size() * ratio).toSize()
             scaled = pixmap.scaled(
-                rect.size().toSize(),
+                physical_size,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            x_off = rect.x() + (rect.width() - scaled.width()) / 2
-            y_off = rect.y() + (rect.height() - scaled.height()) / 2
-            painter.drawPixmap(int(x_off), int(y_off), scaled)
+            scaled.setDevicePixelRatio(ratio)
+            logical_size = scaled.deviceIndependentSize()
+            x_off = rect.x() + (rect.width() - logical_size.width()) / 2
+            y_off = rect.y() + (rect.height() - logical_size.height()) / 2
+            painter.drawPixmap(QPointF(x_off, y_off), scaled)
         else:
             painter.fillRect(rect, QColor(theme.THUMB_PLACEHOLDER))
 
