@@ -22,6 +22,7 @@ import sqlite3
 import threading
 from collections import defaultdict
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from prismic.domain.collection import Collection
@@ -266,6 +267,20 @@ def run_reconciliation(
     estimate available while it's still under way. That count is persisted
     (via `ScanStatsRepository`) once this scan itself finishes walking, for
     the *next* call to use.
+
+    Hashing itself -- the slow part on a large root, since it means reading
+    every candidate file's full contents -- runs on a pool of threads
+    rather than one file at a time: each `hash_file` call is independent
+    (its own file handle, its own hashlib state) and spends most of its
+    time in I/O or in hashlib's C extension, both of which release the
+    GIL, so real wall-clock concurrency is available here without needing
+    separate processes. `ThreadPoolExecutor`'s own default sizing (a small
+    multiple of the CPU count) is used rather than a hand-picked constant,
+    same reasoning as everywhere else in this codebase that leans on a
+    stdlib default over a guessed number. Reconciliation itself (the
+    `reconcile()` call below) stays single-threaded -- it's a sequence of
+    dependent SQLite writes under one transaction, not an independent-unit
+    workload like hashing is.
     """
     stats_repository = ScanStatsRepository(connection)
     expected_total = stats_repository.get_last_file_count()
@@ -274,23 +289,29 @@ def run_reconciliation(
     unreadable_paths: set[str] = set()
     processed = 0
 
-    for scanned_file in scan(collection):
-        try:
-            content_hash = hash_file(scanned_file.absolute_path)
-        except OSError:
-            unreadable_paths.add(scanned_file.relative_path)
-        else:
-            hashed_files.append(
-                HashedFile(
-                    relative_path=scanned_file.relative_path,
-                    content_hash=content_hash,
-                    size=scanned_file.size,
-                    mtime=scanned_file.mtime,
+    with ThreadPoolExecutor(thread_name_prefix="prismic-hash") as executor:
+        futures = {
+            executor.submit(hash_file, scanned_file.absolute_path): scanned_file
+            for scanned_file in scan(collection)
+        }
+        for future in as_completed(futures):
+            scanned_file = futures[future]
+            try:
+                content_hash = future.result()
+            except OSError:
+                unreadable_paths.add(scanned_file.relative_path)
+            else:
+                hashed_files.append(
+                    HashedFile(
+                        relative_path=scanned_file.relative_path,
+                        content_hash=content_hash,
+                        size=scanned_file.size,
+                        mtime=scanned_file.mtime,
+                    )
                 )
-            )
-        processed += 1
-        if on_progress is not None:
-            on_progress(processed, expected_total)
+            processed += 1
+            if on_progress is not None:
+                on_progress(processed, expected_total)
 
     stats_repository.set_last_file_count(processed)
 

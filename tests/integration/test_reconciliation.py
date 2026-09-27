@@ -259,6 +259,40 @@ def test_scan_persists_its_own_file_count_for_the_next_scan_to_use(
     assert ScanStatsRepository(migrated_connection).get_last_file_count() == 2
 
 
+def test_hashing_runs_multiple_files_concurrently(
+    collection: Collection,
+    reconciler: Reconciler,
+    migrated_connection: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole point of parallelizing hashing: on a large root, files are
+    hashed *at the same time*, not one after another. Each stand-in `hash_file`
+    call blocks until every other one of the N files has also entered the
+    function -- a barrier that only clears if all N are in flight together,
+    which is only possible if they're running on separate threads
+    concurrently rather than sequentially on one."""
+    import threading
+
+    import prismic.indexing.reconciler as reconciler_module
+
+    # Kept comfortably below ThreadPoolExecutor's own minimum default pool
+    # size (`min(32, (os.cpu_count() or 1) + 4)`, at least 5 even on a
+    # single-core CI runner) so this can't spuriously fail for lack of
+    # worker threads rather than for a real regression to sequential hashing.
+    n_files = 4
+    for i in range(n_files):
+        (collection.root / f"{i}.jpg").write_bytes(f"content {i}".encode())
+    barrier = threading.Barrier(n_files, timeout=5)
+
+    def _blocking_hash_file(path: object) -> str:
+        barrier.wait()  # hangs forever (until the 5s timeout) unless all N arrive together
+        return str(path)
+
+    monkeypatch.setattr(reconciler_module, "hash_file", _blocking_hash_file)
+
+    _run(reconciler, collection, migrated_connection)  # must not time out
+
+
 def test_reconciliation_can_run_on_a_separate_connection_to_the_same_file(
     tmp_path: Path,
 ) -> None:
