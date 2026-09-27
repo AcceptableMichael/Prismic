@@ -7,12 +7,13 @@ Cell size is picked by brute-force search over candidate column counts
 `ceil(N / cols)`, and the cell size is bounded by whichever of
 `width / cols` or `height / rows` is smaller -- the column count that
 maximizes that bound is used, so cells end up as large as possible while
-every one of them still fits on screen at once. This is a uniform grid
-(every cell the same size, each image cropped to fill it -- same
-`KeepAspectRatioByExpanding` scaling `ThumbnailDelegate` uses for the
-result list's own thumbnails), not a "justified" mosaic that sizes each
-cell to its image's own aspect ratio -- straightforward over
-sophisticated, deliberately, per the product ask.
+every one of them still fits on screen at once. Cell slots are uniform,
+but each image is scaled with `KeepAspectRatio` (never `...ByExpanding`)
+and centered within its slot rather than cropped -- the product ask was
+explicit that no content may be cropped, even at the cost of letterboxed
+gaps around non-matching aspect ratios. Not a "justified" mosaic that
+sizes each cell to its image's own aspect ratio -- straightforward over
+sophisticated, deliberately.
 
 Thumbnail decoding is delegated entirely to `ThumbnailProvider` -- the
 same async, cached, worker-pool-backed decoder the result list's own
@@ -104,11 +105,11 @@ class SelectionGridView(QWidget):
         if pixmap is not None:
             scaled = pixmap.scaled(
                 rect.size().toSize(),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            x_off = rect.x() - (scaled.width() - rect.width()) / 2
-            y_off = rect.y() - (scaled.height() - rect.height()) / 2
+            x_off = rect.x() + (rect.width() - scaled.width()) / 2
+            y_off = rect.y() + (rect.height() - scaled.height()) / 2
             painter.drawPixmap(int(x_off), int(y_off), scaled)
             if is_video:
                 self._paint_play_badge(painter, rect)

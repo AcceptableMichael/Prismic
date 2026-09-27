@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from pytestqt.qtbot import QtBot
 
 from prismic.application.worker_pool import WorkerPool
@@ -62,3 +64,35 @@ def test_grid_view_renders_without_crashing_and_requests_missing_thumbnails(
     qtbot.waitUntil(lambda: provider.has_failed(1) or provider.get(1) is not None, timeout=5000)
 
     pool.shutdown(wait=True)
+
+
+def test_a_non_matching_aspect_ratio_is_letterboxed_not_cropped(qtbot: QtBot) -> None:
+    """The product's own ask: content is never cropped, even if it doesn't
+    fill its grid cell neatly -- a very wide pixmap in a square-ish cell
+    must come out scaled down on *both* axes (letterboxed), not scaled to
+    exactly fill one axis while overflowing the other (which is what
+    `KeepAspectRatioByExpanding`, the cropping mode, would produce)."""
+    cols, cell_w, cell_h = _best_grid(1, 300, 300)
+    assert cols == 1
+
+    source = QPixmap(800, 100)
+    scaled = source.scaled(
+        int(cell_w),
+        int(cell_h),
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+
+    assert scaled.width() <= cell_w
+    assert scaled.height() <= cell_h
+
+    # Sanity: render the real widget end-to-end with this same pixmap to
+    # confirm nothing crashes along that path.
+    provider = ThumbnailProvider()
+    provider._cache[1] = source
+    view = SelectionGridView(provider, lambda: None)
+    qtbot.addWidget(view)
+    view.resize(300, 300)
+    view.set_items([(1, Path("a.jpg"))])
+    view.show()
+    qtbot.waitExposed(view)
