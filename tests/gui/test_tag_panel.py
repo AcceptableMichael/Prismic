@@ -46,17 +46,24 @@ def test_search_is_fuzzy_not_just_substring(qtbot: QtBot) -> None:
     assert _names(panel) == ["vacation"]
 
 
-def test_enter_with_a_match_toggles_the_top_filtered_result(qtbot: QtBot) -> None:
+def test_enter_always_creates_even_when_a_filtered_match_exists(qtbot: QtBot) -> None:
+    """Enter's outcome is exactly what was typed, never a row picked off
+    the filtered list underneath -- even though "sun" fuzzy-matches
+    "sunset" (and would sort first among the matches), Enter must create
+    a literal "sun" tag, not toggle "sunset"."""
     panel = TagPanel("Item tags")
     qtbot.addWidget(panel)
     panel.set_tags(_TAGS, frozenset())
     toggled: list[int] = []
+    created: list[str] = []
     panel.toggle_requested.connect(toggled.append)
+    panel.create_and_check_requested.connect(created.append)
 
     panel.search_box.setText("sun")
     qtbot.keyClick(panel.search_box, Qt.Key.Key_Return)
 
-    assert toggled == [2]  # "sunset" sorts first among the matches
+    assert created == ["sun"]
+    assert toggled == []
     assert panel.search_box.text() == ""
 
 

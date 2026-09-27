@@ -54,7 +54,11 @@ from prismic.application.session import PrismicSession
 from prismic.domain.media import Media
 from prismic.domain.tag import Tag
 from prismic.indexing.reconciler import ReconciliationResult
-from prismic.persistence.errors import CollectionLockedError, PersistenceError
+from prismic.persistence.errors import (
+    CollectionLockedError,
+    DuplicateTagNameError,
+    PersistenceError,
+)
 from prismic.ui.column_splitter import ColumnSplitter
 from prismic.ui.frameless_dialog import MessageDialog
 from prismic.ui.future_watcher import FutureWatcher
@@ -876,18 +880,34 @@ class MainWindow(QMainWindow):
             self._on_filter_toggle(tag.id)
 
     def _create_tag_and_find(self, name: str) -> Tag | None:
-        """Creates a tag and returns it by name, for the search-box's
-        "no match -> create it" flow, which needs the new tag's id to
-        immediately apply/select it in the same keystroke. `TagCreateCommand`
-        doesn't hand back the row it inserted, so this re-reads the tag list
-        after creating -- names are unique, so the match is unambiguous."""
+        """Creates a tag and returns it, for the search box's Enter flow
+        (`TagPanel._commit_search` always emits `create_and_check_requested`,
+        never falls back to toggling a fuzzy-filtered match -- see its
+        docstring). A tag already existing under this exact name isn't a
+        duplicate-name *mistake* here the way `_on_tag_create` (used
+        elsewhere, e.g. by tests seeding a tag directly) treats it as --
+        with no "select from the list instead" alternative on offer, typing
+        an existing tag's exact name and hitting Enter should just apply it,
+        silently, not surface an error dialog for doing the obvious thing.
+        `TagCreateCommand` doesn't hand back the row it inserted (nor does
+        skipping it on a duplicate hand back the existing row), so this
+        re-reads the tag list either way -- names are unique, so the match
+        is unambiguous."""
         if self.session is None:
             return None
-        self._on_tag_create(name)
+        try:
+            self.session.execute(TagCreateCommand(name=name))
+        except DuplicateTagNameError:
+            pass
+        except Exception as exc:  # noqa: BLE001 - shown to the user, not swallowed
+            MessageDialog.warning(self, "Could not create tag", str(exc))
+            return None
+        else:
+            self._refresh_all()
         for tag in self.session.tags.list_all():
             if tag.name == name:
                 return tag
-        return None  # creation failed (e.g. a duplicate name) -- _on_tag_create already warned
+        return None
 
     def _on_toggle_thumbnails(self, checked: bool) -> None:
         self._thumbnail_delegate.show_thumbnails = checked

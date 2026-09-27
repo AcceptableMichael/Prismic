@@ -4,10 +4,12 @@ tag rows below.
 Checked tags are always sorted to the top, so what's already applied (or,
 for the filter panel, already active) reads at a glance; typing in the
 search box narrows only the *unchecked* tags beneath them, leaving the
-checked ones pinned in place. Hitting Enter toggles on the top-filtered
-match, or -- if nothing matches -- asks the caller to create a tag with
-that name and immediately check it, so a single keystroke-driven flow
-covers both "find and apply" and "create and apply" without a dialog.
+checked ones pinned in place. Hitting Enter always asks the caller to
+create a tag with the typed name and immediately check it -- never picks
+a row off the filtered list instead, even when one happens to fuzzy-match
+what was typed, so Enter's outcome is exactly what was typed, not
+whatever the filter narrowed down to. Clicking a filtered row is still
+how you select an existing tag without typing its full name.
 
 Row interaction itself (whole-row toggle, hover rename/delete icons,
 inline rename) lives in `TagRowDelegate`; this widget only wires its
@@ -157,11 +159,7 @@ class TagPanel(QWidget):
         query = self.search_box.text().strip()
         if not query:
             return
-        matches = self._unchecked_matches(query)
-        if matches:
-            self.toggle_requested.emit(matches[0].id)
-        else:
-            self.create_and_check_requested.emit(query)
+        self.create_and_check_requested.emit(query)
         self.clear_search_keep_focus()
 
 

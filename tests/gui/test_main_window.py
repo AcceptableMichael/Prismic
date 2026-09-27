@@ -250,6 +250,36 @@ def test_filter_create_and_check_creates_the_tag_and_activates_the_filter(
     assert window.result_model.rowCount() == 0
 
 
+def test_item_create_and_check_with_an_existing_exact_name_reuses_it_silently(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The search box's Enter flow always asks to "create" the typed name,
+    even when a tag by that exact name already exists (see
+    `TagPanel._commit_search`'s docstring: Enter never falls back to
+    picking a filtered row instead). That's expected, not a mistake, so it
+    must apply the existing tag with no duplicate-name warning dialog."""
+    _open_and_wait(qtbot, window, collection_dir)
+    current_id = window.session.state.result_set[0]  # type: ignore[union-attr]
+    window.session.state.current_item = current_id  # type: ignore[union-attr]
+    window._refresh_all()
+    window._on_tag_create("vacation")
+    existing = window.session.tags.list_all()[0]  # type: ignore[union-attr]
+
+    shown: list[str] = []
+    monkeypatch.setattr(
+        "prismic.ui.main_window.MessageDialog.warning",
+        lambda *args, **kwargs: shown.append(args[-1]),
+    )
+
+    window._on_item_create_and_check("vacation")
+
+    assert shown == []
+    assert [t.name for t in window.session.tags.list_all()] == ["vacation"]  # type: ignore[union-attr]
+    assert [t.id for t in window.session.mappings.tags_for_media(current_id)] == [  # type: ignore[union-attr]
+        existing.id
+    ]
+
+
 def test_filter_create_and_check_then_deselect_restores_the_full_list(
     qtbot: QtBot, window: MainWindow, collection_dir: Path
 ) -> None:
