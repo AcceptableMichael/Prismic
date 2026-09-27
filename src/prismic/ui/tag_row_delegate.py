@@ -36,6 +36,7 @@ from PySide6.QtCore import (
     QEvent,
     QModelIndex,
     QPersistentModelIndex,
+    QPointF,
     QRect,
     QSize,
     Qt,
@@ -199,20 +200,35 @@ class TagRowDelegate(QStyledItemDelegate):
 
     def _paint_icon(self, painter: QPainter, rect: QRect, kind: str) -> None:
         color = QColor(theme.TEXT_MUTED)
-        painter.setPen(QPen(color, 1.6))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
         cx, cy = rect.center().x(), rect.center().y()
         if kind == "rename":
+            # A solid tapered-pencil silhouette (body + pointed tip), not
+            # an outline: at 18px, stroking two near-parallel edges of a
+            # shape this narrow left the strokes overlapping into a
+            # shapeless blob rather than a recognizable pencil. A single
+            # filled polygon reads cleanly at this size instead.
+            axis = QPointF(0.7071, -0.7071)  # 45 degrees, pointing up-right (the tip)
+            normal = QPointF(0.7071, 0.7071)  # perpendicular to axis
+            half_width = 1.5
+            body_length = 7.5
+            tip_length = 4.5
+            tail = QPointF(cx - 4, cy + 4)
+            body_end = tail + axis * body_length
+            tip = tail + axis * (body_length + tip_length)
+            offset = normal * half_width
             path = QPainterPath()
-            path.moveTo(cx - 4, cy + 4)
-            path.lineTo(cx + 3, cy - 3)
-            path.moveTo(cx + 1, cy - 5)
-            path.lineTo(cx + 5, cy - 1)
-            path.lineTo(cx - 2, cy + 6)
-            path.lineTo(cx - 5, cy + 5)
-            path.lineTo(cx - 4, cy + 4)
+            path.moveTo(tail - offset)
+            path.lineTo(tail + offset)
+            path.lineTo(body_end + offset)
+            path.lineTo(tip)
+            path.lineTo(body_end - offset)
+            path.closeSubpath()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
             painter.drawPath(path)
         else:
+            painter.setPen(QPen(color, 1.6))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawLine(cx - 5, cy - 4, cx + 5, cy - 4)
             painter.drawRect(cx - 3, cy - 4, 6, 1)
             painter.drawRoundedRect(cx - 4, cy - 3, 8, 8, 1, 1)
