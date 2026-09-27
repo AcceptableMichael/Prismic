@@ -1,0 +1,163 @@
+"""A grid of every currently-selected item, shown instead of the
+single-item `MediaViewer` whenever more than one file is selected in the
+result list.
+
+Cell size is picked by brute-force search over candidate column counts
+(1..N): for each column count, the resulting row count is
+`ceil(N / cols)`, and the cell size is bounded by whichever of
+`width / cols` or `height / rows` is smaller -- the column count that
+maximizes that bound is used, so cells end up as large as possible while
+every one of them still fits on screen at once. This is a uniform grid
+(every cell the same size, each image cropped to fill it -- same
+`KeepAspectRatioByExpanding` scaling `ThumbnailDelegate` uses for the
+result list's own thumbnails), not a "justified" mosaic that sizes each
+cell to its image's own aspect ratio -- straightforward over
+sophisticated, deliberately, per the product ask.
+
+Thumbnail decoding is delegated entirely to `ThumbnailProvider` -- the
+same async, cached, worker-pool-backed decoder the result list's own
+thumbnails use -- so showing a grid of already-visible selected items
+costs nothing beyond what the list's own thumbnails would have decoded
+anyway.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Callable
+from pathlib import Path
+
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent
+from PySide6.QtWidgets import QWidget
+
+from prismic.application.worker_pool import WorkerPool
+from prismic.media.formats import SUPPORTED_VIDEO_EXTENSIONS
+from prismic.ui import theme
+from prismic.ui.thumbnail_provider import ThumbnailProvider
+
+_MARGIN = 12
+_SPACING = 6
+
+
+class SelectionGridView(QWidget):
+    def __init__(
+        self,
+        provider: ThumbnailProvider,
+        worker_pool: Callable[[], WorkerPool | None],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("selectionGrid")
+        self._provider = provider
+        self._worker_pool = worker_pool
+        self._items: list[tuple[int, Path]] = []
+        self._provider.thumbnail_ready.connect(self._on_thumbnail_event)
+        self._provider.decode_failed.connect(self._on_thumbnail_event)
+
+    def set_items(self, items: list[tuple[int, Path]]) -> None:
+        """`items` is (media_id, absolute_path) pairs, in display order."""
+        self._items = items
+        self.update()
+
+    def _on_thumbnail_event(self, media_id: int) -> None:
+        if any(media_id == item_id for item_id, _ in self._items):
+            self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: ARG002
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor(theme.BG_CANVAS))
+
+        if not self._items:
+            painter.end()
+            return
+
+        cols, cell_w, cell_h = _best_grid(len(self._items), self.width(), self.height())
+        for index, (media_id, path) in enumerate(self._items):
+            row, col = divmod(index, cols)
+            x = _MARGIN + col * (cell_w + _SPACING)
+            y = _MARGIN + row * (cell_h + _SPACING)
+            self._paint_cell(painter, QRectF(x, y, cell_w, cell_h), media_id, path)
+
+        painter.end()
+
+    def _paint_cell(self, painter: QPainter, rect: QRectF, media_id: int, path: Path) -> None:
+        clip = QPainterPath()
+        clip.addRoundedRect(rect, 6, 6)
+        painter.save()
+        painter.setClipPath(clip)
+
+        pixmap = self._provider.get(media_id)
+        is_video = path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS
+
+        if pixmap is not None:
+            scaled = pixmap.scaled(
+                rect.size().toSize(),
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            x_off = rect.x() - (scaled.width() - rect.width()) / 2
+            y_off = rect.y() - (scaled.height() - rect.height()) / 2
+            painter.drawPixmap(int(x_off), int(y_off), scaled)
+            if is_video:
+                self._paint_play_badge(painter, rect)
+        else:
+            painter.fillRect(rect, QColor(theme.THUMB_PLACEHOLDER))
+            if is_video:
+                self._paint_play_badge(painter, rect)
+            elif not self._provider.has_failed(media_id):
+                self._request_thumbnail(media_id, path)
+
+        painter.restore()
+
+    def _paint_play_badge(self, painter: QPainter, rect: QRectF) -> None:
+        center = rect.center()
+        radius = min(rect.width(), rect.height()) * 0.16
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(theme.THUMB_VIDEO_BADGE))
+        painter.drawEllipse(center, radius, radius)
+        triangle = QPainterPath()
+        side = radius * 0.9
+        triangle.moveTo(center.x() - side * 0.35, center.y() - side * 0.5)
+        triangle.lineTo(center.x() - side * 0.35, center.y() + side * 0.5)
+        triangle.lineTo(center.x() + side * 0.55, center.y())
+        triangle.closeSubpath()
+        painter.setBrush(QColor(theme.TEXT_PRIMARY))
+        painter.drawPath(triangle)
+
+    def _request_thumbnail(self, media_id: int, path: Path) -> None:
+        if path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS:
+            return
+        pool = self._worker_pool()
+        if pool is None:
+            return
+        self._provider.request(media_id, path, pool)
+
+
+def _best_grid(count: int, width: int, height: int) -> tuple[int, float, float]:
+    """The (columns, cell_width, cell_height) that fits `count` cells into
+    a `width` x `height` area with the largest possible cell -- see this
+    module's docstring for the search itself."""
+    available_w = max(1.0, width - 2 * _MARGIN)
+    available_h = max(1.0, height - 2 * _MARGIN)
+
+    best_cols = 1
+    best_cell_w = available_w
+    best_cell_h = available_h / count
+    best_score = min(best_cell_w, best_cell_h)
+
+    for cols in range(2, count + 1):
+        rows = math.ceil(count / cols)
+        cell_w = (available_w - (cols - 1) * _SPACING) / cols
+        cell_h = (available_h - (rows - 1) * _SPACING) / rows
+        if cell_w <= 0 or cell_h <= 0:
+            continue
+        score = min(cell_w, cell_h)
+        if score > best_score:
+            best_score = score
+            best_cols = cols
+            best_cell_w = cell_w
+            best_cell_h = cell_h
+
+    return best_cols, best_cell_w, best_cell_h

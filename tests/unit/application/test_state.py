@@ -110,3 +110,67 @@ def test_current_item_becomes_none_when_result_set_is_empty(
 
     assert state.result_set == []
     assert state.current_item is None
+
+
+def test_selected_items_defaults_to_empty(
+    media: MediaRepository, mappings: MappingRepository
+) -> None:
+    state = ApplicationState()
+
+    state.recompute(media, mappings)
+
+    assert state.selected_items == frozenset()
+
+
+def test_selected_items_survives_a_recompute_when_still_eligible(
+    media: MediaRepository, mappings: MappingRepository
+) -> None:
+    a = _add_active_media(media, "a.jpg")
+    b = _add_active_media(media, "b.jpg")
+    c = _add_active_media(media, "c.jpg")
+
+    state = ApplicationState()
+    state.recompute(media, mappings)
+    state.current_item = a
+    state.selected_items = frozenset({a, b, c})
+
+    state.recompute(media, mappings)
+
+    assert state.selected_items == frozenset({a, b, c})
+
+
+def test_selected_items_drops_an_id_that_leaves_the_result_set(
+    media: MediaRepository, mappings: MappingRepository
+) -> None:
+    a = _add_active_media(media, "a.jpg")
+    b = _add_active_media(media, "b.jpg")
+    removed = max(a, b) + 1000  # stands in for an item deleted since the last scan
+
+    state = ApplicationState()
+    state.result_set = [a, b, removed]
+    state.current_item = a
+    state.selected_items = frozenset({a, b, removed})
+
+    state.recompute(media, mappings)
+
+    assert state.selected_items == frozenset({a, b})
+
+
+def test_current_item_is_always_included_in_selected_items(
+    media: MediaRepository, mappings: MappingRepository
+) -> None:
+    """`current_item` is the click/keyboard anchor -- it must never fall
+    outside `selected_items`, even if nothing had explicitly added it
+    (e.g. after `_resolve_current_item` reassigns it to a fresh item with
+    no selection of its own yet)."""
+    a = _add_active_media(media, "a.jpg")
+
+    state = ApplicationState()
+    state.result_set = [1]
+    state.current_item = 1
+    state.selected_items = frozenset()
+
+    state.recompute(media, mappings)
+
+    assert state.current_item == a
+    assert state.selected_items == frozenset({a})

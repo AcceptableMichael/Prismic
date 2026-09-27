@@ -14,9 +14,9 @@ from pathlib import Path
 
 from PySide6.QtCore import (
     QEvent,
-    QModelIndex,
+    QItemSelection,
+    QItemSelectionModel,
     QObject,
-    QPersistentModelIndex,
     QSettings,
     Qt,
     QTimer,
@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
     QLineEdit,
-    QListView,
     QMainWindow,
     QMenu,
     QSplitter,
@@ -41,7 +40,11 @@ from prismic.application.commands.filter_commands import (
     FilterDeselectCommand,
     FilterSelectCommand,
 )
-from prismic.application.commands.mapping_commands import MappingAddCommand, MappingRemoveCommand
+from prismic.application.commands.mapping_commands import (
+    MappingAddCommand,
+    MappingRemoveCommand,
+    MappingSetForManyCommand,
+)
 from prismic.application.commands.tag_commands import (
     TagCreateCommand,
     TagDeleteCommand,
@@ -73,8 +76,10 @@ from prismic.ui.keyboard import (
     strip_modifier_prefix,
 )
 from prismic.ui.panel_toolbar import PanelToolbar
+from prismic.ui.result_list_view import ResultListView
 from prismic.ui.result_model import MediaIdRole, ResultListModel
 from prismic.ui.scan_progress_bar import ScanProgressBar
+from prismic.ui.selection_grid_view import SelectionGridView
 from prismic.ui.settings_dialog import SettingsDialog
 from prismic.ui.tag_model import CheckedRole, CheckedSlotRole, UncheckedSlotRole
 from prismic.ui.tag_panel import TagPanel
@@ -82,8 +87,6 @@ from prismic.ui.thumbnail_delegate import ThumbnailDelegate
 from prismic.ui.thumbnail_provider import ThumbnailProvider
 from prismic.ui.transient_message_bar import TransientMessageBar
 from prismic.ui.viewer import MediaViewer
-
-_Index = QModelIndex | QPersistentModelIndex
 
 
 class MainWindow(QMainWindow):
@@ -252,7 +255,7 @@ class MainWindow(QMainWindow):
         self.thumbnail_provider.decode_failed.connect(self._on_thumbnail_ready)
 
         self.result_model = ResultListModel(self)
-        self.result_list = QListView()
+        self.result_list = ResultListView()
         self.result_list.setObjectName("resultList")
         # Never horizontal-scroll -- see TagPanel's matching setting for why.
         self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -265,17 +268,37 @@ class MainWindow(QMainWindow):
             self.result_list,
         )
         self.result_list.setItemDelegate(self._thumbnail_delegate)
+        # Both signals feed the same handler: `currentChanged` alone misses
+        # a shift/ctrl-click that adds rows without moving the current one
+        # (e.g. ctrl-clicking a row that becomes current anyway still needs
+        # `selectionChanged` for a *different* reason -- the full selected
+        # set changed, not just the anchor), and `selectionChanged` alone
+        # misses the reverse. The handler re-derives both from the view
+        # regardless of which one fired, so there's no per-signal branching.
         self.result_list.selectionModel().currentChanged.connect(self._on_result_selection_changed)
+        self.result_list.selectionModel().selectionChanged.connect(
+            self._on_result_selection_changed
+        )
 
         self.viewer = MediaViewer(
             worker_pool=lambda: self.session.worker_pool if self.session is not None else None
         )
         self.viewer.load_error.connect(self._on_viewer_error)
+        self.selection_grid = SelectionGridView(
+            self.thumbnail_provider,
+            lambda: self.session.worker_pool if self.session is not None else None,
+        )
+        # Swaps between the single-item viewer and the multi-select grid --
+        # see `_show_current_media` -- rather than the viewer sitting
+        # directly in the splitter as it used to.
+        self._media_stack = QStackedWidget()
+        self._media_stack.addWidget(self.viewer)
+        self._media_stack.addWidget(self.selection_grid)
 
         splitter = ColumnSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._left_column)
         splitter.addWidget(self.result_list)
-        splitter.addWidget(self.viewer)
+        splitter.addWidget(self._media_stack)
         # The drawn line stays 1px (see ColumnSplitter) but the actual
         # draggable area is much wider -- anything close to the old 1px
         # hitbox is too imprecise a mouse target to register as "wider" at
@@ -617,6 +640,26 @@ class MainWindow(QMainWindow):
         assert self.session is not None
         return self.session.tag_recency.order(self.session.tags.list_all())
 
+    def _selection_or_current(self) -> frozenset[int]:
+        """`state.selected_items`, falling back to `{state.current_item}`
+        when it's empty but a current item is set.
+
+        `ApplicationState.recompute()` keeps the two in sync (`current_item`
+        is always a member of `selected_items`) for any change that goes
+        through a command, but code that pokes `state.current_item`
+        directly without a `recompute()` in between -- mainly tests
+        exercising a single-item scenario the old way -- would otherwise
+        see every selection-aware code path below treat that as "nothing
+        selected." This is what keeps that legacy pattern working without
+        forcing every caller to also set `selected_items`.
+        """
+        assert self.session is not None
+        selected = self.session.state.selected_items
+        if selected:
+            return selected
+        current = self.session.state.current_item
+        return frozenset({current}) if current is not None else frozenset()
+
     def _refresh_all(self) -> None:
         if self.session is None:
             return
@@ -660,14 +703,38 @@ class MainWindow(QMainWindow):
 
     def _refresh_item_tag_panel(self, tags: list[Tag]) -> None:
         assert self.session is not None
-        current = self.session.state.current_item
-        if current is None:
+        selected = self._selection_or_current()
+        if not selected:
             self.item_tag_panel.set_tags(tags, frozenset())
             self._item_tag_order = []
             self._item_tag_order_item_id = None
             return
-        mapped_ids = frozenset(t.id for t in self.session.mappings.tags_for_media(current))
-        self.item_tag_panel.set_tags(self._stable_item_tags(tags, mapped_ids, current), mapped_ids)
+        if len(selected) == 1:
+            current = next(iter(selected))
+            mapped_ids = frozenset(t.id for t in self.session.mappings.tags_for_media(current))
+            self.item_tag_panel.set_tags(
+                self._stable_item_tags(tags, mapped_ids, current), mapped_ids
+            )
+            return
+        # Multi-select: "checked" means every selected file has the tag
+        # (the intersection) -- anything less than all of them shows
+        # unchecked, same as if none had it, per the product's own
+        # definition of what the edit list should show for a bulk
+        # selection. The stable manually-maintained order only makes
+        # sense keyed to one file, so it's reset here and rebuilt fresh
+        # once selection collapses back to a single item.
+        self._item_tag_order = []
+        self._item_tag_order_item_id = None
+        common_ids = self._common_tag_ids(selected)
+        self.item_tag_panel.set_tags(tags, common_ids)
+
+    def _common_tag_ids(self, media_ids: frozenset[int]) -> frozenset[int]:
+        assert self.session is not None
+        tag_id_sets = [
+            {t.id for t in self.session.mappings.tags_for_media(media_id)}
+            for media_id in media_ids
+        ]
+        return frozenset(set.intersection(*tag_id_sets)) if tag_id_sets else frozenset()
 
     def _stable_item_tags(
         self, tags: list[Tag], mapped_ids: frozenset[int], current_item: int
@@ -695,17 +762,47 @@ class MainWindow(QMainWindow):
         return stable_checked + rest
 
     def _sync_result_selection(self) -> None:
+        """State -> view: reflect `session.state`'s selection onto the
+        real Qt selection model. The reverse direction --
+        `_on_result_selection_changed`, view -> state -- is what an
+        interactive click drives; this one runs after any non-interactive
+        state change (`_refresh_all()`, `_navigate()`)."""
         assert self.session is not None
+        selected = self._selection_or_current()
         current = self.session.state.current_item
-        if current is None:
+        if not selected:
             self.result_list.clearSelection()
             return
-        row = self.result_model.row_for_media_id(current)
-        if row is not None:
-            self.result_list.setCurrentIndex(self.result_model.index(row, 0))
+        selection_model = self.result_list.selectionModel()
+        item_selection = QItemSelection()
+        for media_id in selected:
+            row = self.result_model.row_for_media_id(media_id)
+            if row is not None:
+                index = self.result_model.index(row, 0)
+                item_selection.select(index, index)
+        selection_model.select(item_selection, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+        if current is not None:
+            row = self.result_model.row_for_media_id(current)
+            if row is not None:
+                selection_model.setCurrentIndex(
+                    self.result_model.index(row, 0), QItemSelectionModel.SelectionFlag.NoUpdate
+                )
 
     def _show_current_media(self) -> None:
         assert self.session is not None
+        selected = self._selection_or_current()
+        if len(selected) > 1:
+            self._media_stack.setCurrentWidget(self.selection_grid)
+            items = []
+            for media_id in self._display_order:
+                if media_id not in selected:
+                    continue
+                path = self._resolve_media_path(media_id)
+                if path is not None:
+                    items.append((media_id, path))
+            self.selection_grid.set_items(items)
+            return
+        self._media_stack.setCurrentWidget(self.viewer)
         current = self.session.state.current_item
         if current is None:
             self.viewer.clear()
@@ -748,20 +845,53 @@ class MainWindow(QMainWindow):
 
     # -- User interaction -----------------------------------------------------
 
-    def _on_result_selection_changed(self, current: _Index, _previous: _Index) -> None:
-        if self.session is None or not current.isValid():
+    def _on_result_selection_changed(self, *_args: object) -> None:
+        """View -> state, for an interactive selection change (a click of
+        any kind -- plain, shift, or ctrl -- handled by `ResultListView`
+        itself; this just reads back whatever it ended up with). Ignores
+        its arguments and re-derives the full selected set plus the
+        current/anchor item fresh from the view every time, rather than
+        trying to reason about which of `currentChanged`/`selectionChanged`
+        fired or what exactly changed -- see the two signals' shared
+        connection in `_build_ui` for why both land here."""
+        if self.session is None:
             return
-        media_id = self.result_model.data(current, MediaIdRole)
-        if not isinstance(media_id, int) or media_id == self.session.state.current_item:
+        selection_model = self.result_list.selectionModel()
+        selected_ids = frozenset(
+            media_id
+            for index in selection_model.selectedIndexes()
+            if isinstance(media_id := self.result_model.data(index, MediaIdRole), int)
+        )
+        current_index = selection_model.currentIndex()
+        current_id = (
+            self.result_model.data(current_index, MediaIdRole)
+            if current_index.isValid()
+            else None
+        )
+        if not isinstance(current_id, int):
+            current_id = next(iter(selected_ids)) if selected_ids else None
+        if current_id is not None:
+            selected_ids = selected_ids | {current_id}
+        if (
+            selected_ids == self.session.state.selected_items
+            and current_id == self.session.state.current_item
+        ):
             return
-        self.session.state.current_item = media_id
+        self.session.state.selected_items = selected_ids
+        self.session.state.current_item = current_id
         self._show_current_media()
         self._refresh_item_tag_panel(self._ordered_tags())
 
     def _navigate(self, delta: int) -> None:
         """Step `delta` positions through `self._display_order` -- the
         order actually on screen, which is `session.state.result_set`
-        itself unless shuffle has rearranged it (see `_refresh_all`)."""
+        itself unless shuffle has rearranged it (see `_refresh_all`).
+
+        Collapses a multi-selection back down to the single item landed
+        on -- arrow-key paging is a single-item gesture, the same
+        convention most file browsers use, and the alternative (leaving
+        a stale multi-selection highlighted while paging one item at a
+        time through the viewer) would just be confusing."""
         if self.session is None:
             return
         result_set = self._display_order
@@ -774,7 +904,9 @@ class MainWindow(QMainWindow):
         else:
             index = result_set.index(current)
             new_index = max(0, min(len(result_set) - 1, index + delta))
-        self.session.state.current_item = result_set[new_index]
+        new_item = result_set[new_index]
+        self.session.state.current_item = new_item
+        self.session.state.selected_items = frozenset({new_item})
         self._sync_result_selection()
         self._show_current_media()
         self._refresh_item_tag_panel(self._ordered_tags())
@@ -829,15 +961,29 @@ class MainWindow(QMainWindow):
     def _on_item_tag_toggle(self, tag_id: int) -> None:
         if self.session is None:
             return
-        current = self.session.state.current_item
-        if current is None:
+        selected = self._selection_or_current()
+        if not selected:
             return
         self.session.tag_recency.record_click(tag_id)
-        mapped_ids = {t.id for t in self.session.mappings.tags_for_media(current)}
-        if tag_id in mapped_ids:
-            self.session.execute(MappingRemoveCommand(media_id=current, tag_id=tag_id))
+        if len(selected) == 1:
+            current = next(iter(selected))
+            mapped_ids = {t.id for t in self.session.mappings.tags_for_media(current)}
+            if tag_id in mapped_ids:
+                self.session.execute(MappingRemoveCommand(media_id=current, tag_id=tag_id))
+            else:
+                self.session.execute(MappingAddCommand(media_id=current, tag_id=tag_id))
         else:
-            self.session.execute(MappingAddCommand(media_id=current, tag_id=tag_id))
+            # The panel only ever shows this tag checked (see
+            # `_refresh_item_tag_panel`) when *every* selected file
+            # already has it -- so a toggle from checked always means
+            # "remove from all," and from unchecked always means "add to
+            # whichever ones don't have it yet," in one undo step.
+            already_common = tag_id in self._common_tag_ids(selected)
+            self.session.execute(
+                MappingSetForManyCommand(
+                    media_ids=selected, tag_id=tag_id, adding=not already_common
+                )
+            )
         self._refresh_all()
         self.item_tag_panel.clear_search_keep_focus()
 

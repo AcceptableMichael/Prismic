@@ -1,16 +1,20 @@
 import pytest
 
 from prismic.application.commands.base import CommandContext
-from prismic.application.commands.mapping_commands import MappingAddCommand, MappingRemoveCommand
+from prismic.application.commands.mapping_commands import (
+    MappingAddCommand,
+    MappingRemoveCommand,
+    MappingSetForManyCommand,
+)
 from prismic.application.errors import UnknownMappingError
 from prismic.domain.media import MediaState
 from prismic.persistence.errors import UnknownMediaError, UnknownTagError
 from prismic.persistence.repositories.media_repository import MediaRepository
 
 
-def _make_media(media: MediaRepository) -> int:
+def _make_media(media: MediaRepository, name: str = "a.jpg") -> int:
     return media.create(
-        relative_path="a.jpg", content_hash="a", size=1, mtime=1.0, state=MediaState.ACTIVE
+        relative_path=name, content_hash=name, size=1, mtime=1.0, state=MediaState.ACTIVE
     ).id
 
 
@@ -84,4 +88,87 @@ def test_remove_a_mapping_that_does_not_exist_raises(
     command = MappingRemoveCommand(media_id=media_id, tag_id=tag.id)
 
     with pytest.raises(UnknownMappingError):
+        command.execute(context)
+
+
+def test_set_for_many_adding_only_touches_media_lacking_the_tag(
+    context: CommandContext, media: MediaRepository
+) -> None:
+    has_it = _make_media(media, "has_it.jpg")
+    lacks_it = _make_media(media, "lacks_it.jpg")
+    tag = context.tags.create("vacation")
+    context.mappings.add(has_it, tag.id)
+    command = MappingSetForManyCommand(
+        media_ids=frozenset({has_it, lacks_it}), tag_id=tag.id, adding=True
+    )
+
+    command.execute(context)
+
+    assert {t.id for t in context.mappings.tags_for_media(has_it)} == {tag.id}
+    assert {t.id for t in context.mappings.tags_for_media(lacks_it)} == {tag.id}
+
+
+def test_set_for_many_adding_undo_only_removes_what_it_actually_added(
+    context: CommandContext, media: MediaRepository
+) -> None:
+    """The whole point of tracking only the ids that actually changed:
+    undoing a bulk "add" must not strip the tag from a file that already
+    had it going in -- that file was never this command's doing."""
+    has_it = _make_media(media, "has_it.jpg")
+    lacks_it = _make_media(media, "lacks_it.jpg")
+    tag = context.tags.create("vacation")
+    context.mappings.add(has_it, tag.id)
+    command = MappingSetForManyCommand(
+        media_ids=frozenset({has_it, lacks_it}), tag_id=tag.id, adding=True
+    )
+    command.execute(context)
+
+    command.undo(context)
+
+    assert {t.id for t in context.mappings.tags_for_media(has_it)} == {tag.id}
+    assert context.mappings.tags_for_media(lacks_it) == []
+
+
+def test_set_for_many_removing_only_touches_media_with_the_tag(
+    context: CommandContext, media: MediaRepository
+) -> None:
+    has_it = _make_media(media, "has_it.jpg")
+    lacks_it = _make_media(media, "lacks_it.jpg")
+    tag = context.tags.create("vacation")
+    context.mappings.add(has_it, tag.id)
+    command = MappingSetForManyCommand(
+        media_ids=frozenset({has_it, lacks_it}), tag_id=tag.id, adding=False
+    )
+
+    command.execute(context)
+
+    assert context.mappings.tags_for_media(has_it) == []
+    assert context.mappings.tags_for_media(lacks_it) == []
+
+
+def test_set_for_many_removing_undo_only_restores_what_it_actually_removed(
+    context: CommandContext, media: MediaRepository
+) -> None:
+    has_it = _make_media(media, "has_it.jpg")
+    lacks_it = _make_media(media, "lacks_it.jpg")
+    tag = context.tags.create("vacation")
+    context.mappings.add(has_it, tag.id)
+    command = MappingSetForManyCommand(
+        media_ids=frozenset({has_it, lacks_it}), tag_id=tag.id, adding=False
+    )
+    command.execute(context)
+
+    command.undo(context)
+
+    assert {t.id for t in context.mappings.tags_for_media(has_it)} == {tag.id}
+    assert context.mappings.tags_for_media(lacks_it) == []
+
+
+def test_set_for_many_with_unknown_tag_raises(
+    context: CommandContext, media: MediaRepository
+) -> None:
+    media_id = _make_media(media)
+    command = MappingSetForManyCommand(media_ids=frozenset({media_id}), tag_id=999, adding=True)
+
+    with pytest.raises(UnknownTagError):
         command.execute(context)
