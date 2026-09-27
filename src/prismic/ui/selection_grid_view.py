@@ -15,13 +15,17 @@ gaps around non-matching aspect ratios. Not a "justified" mosaic that
 sizes each cell to its image's own aspect ratio -- straightforward over
 sophisticated, deliberately.
 
-Thumbnail decoding is delegated entirely to `ThumbnailProvider` -- the
-same async, cached, worker-pool-backed decoder the result list's own
-thumbnails use, just constructed with a larger `dimension` (see
-`GRID_THUMBNAIL_DIMENSION`) and its own separate cache/instance (see
-`MainWindow.grid_thumbnail_provider`) -- a grid cell is routinely
-several hundred pixels across, well past where the result list's own
-160px thumbnails read as visibly soft once stretched to fill one.
+Thumbnail decoding is delegated to `ThumbnailProvider` -- the same
+async, cached, worker-pool-backed decoder the result list's own
+thumbnails use, but through its own separate cache/instance (see
+`MainWindow.grid_thumbnail_provider`) and at a dimension computed per
+cell, per paint (`_required_dimension`), rather than one fixed size:
+a cell is anywhere from a shrunk-to-fit dozens-wide grid entry to
+most of the window's height, and a fixed decode cap would either
+blur the latter or waste decode time on the former. `request()`
+no-ops once the cache already meets the size asked for, so re-painting
+after a resize or a selection-count change only triggers a re-decode
+when the cell actually grew past what's cached.
 """
 
 from __future__ import annotations
@@ -43,12 +47,13 @@ _MARGIN = 12
 _SPACING = 6
 
 GRID_THUMBNAIL_DIMENSION = 640
-"""Longer-side decode cap for grid cells -- well above the result list's
-own 160px thumbnails (see `ThumbnailProvider`'s docstring), sized to stay
-sharp for the cell sizes a normal selection/window actually produces
-without decoding every selected file at full original resolution (which
-`MediaViewer`'s single-item path already does, but doing that for
-potentially dozens of selected files at once would be wasteful)."""
+"""Fallback/default decode dimension for the grid's `ThumbnailProvider`
+instance (see `MainWindow.grid_thumbnail_provider`) -- unused in practice
+by `SelectionGridView` itself, which always passes the actual on-screen
+cell size (see `_required_dimension`) so thumbnails stay sharp whether a
+cell ends up much smaller or much larger than this number. Kept as the
+provider's constructor default so `get()`/`has_failed()` callers that
+don't care about sizing still have a sane value."""
 
 
 class SelectionGridView(QWidget):
@@ -111,16 +116,24 @@ class SelectionGridView(QWidget):
             x_off = rect.x() + (rect.width() - scaled.width()) / 2
             y_off = rect.y() + (rect.height() - scaled.height()) / 2
             painter.drawPixmap(int(x_off), int(y_off), scaled)
-            if is_video:
-                self._paint_play_badge(painter, rect)
         else:
             painter.fillRect(rect, QColor(theme.THUMB_PLACEHOLDER))
-            if is_video:
-                self._paint_play_badge(painter, rect)
-            elif not self._provider.has_failed(media_id):
-                self._request_thumbnail(media_id, path)
+
+        if is_video:
+            self._paint_play_badge(painter, rect)
+        elif not self._provider.has_failed(media_id):
+            # Requested every paint, not just when `pixmap is None`: a cell
+            # that already has a thumbnail may still be under-resolution
+            # for its *current* size (the window grew, or the selection
+            # shrank to fewer, larger cells) -- `ThumbnailProvider.request`
+            # is a no-op once the cached decode already meets this size.
+            self._request_thumbnail(media_id, path, self._required_dimension(rect))
 
         painter.restore()
+
+    def _required_dimension(self, rect: QRectF) -> int:
+        ratio = self.devicePixelRatioF()
+        return max(1, math.ceil(max(rect.width(), rect.height()) * ratio))
 
     def _paint_play_badge(self, painter: QPainter, rect: QRectF) -> None:
         center = rect.center()
@@ -137,13 +150,13 @@ class SelectionGridView(QWidget):
         painter.setBrush(QColor(theme.TEXT_PRIMARY))
         painter.drawPath(triangle)
 
-    def _request_thumbnail(self, media_id: int, path: Path) -> None:
+    def _request_thumbnail(self, media_id: int, path: Path, dimension: int) -> None:
         if path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS:
             return
         pool = self._worker_pool()
         if pool is None:
             return
-        self._provider.request(media_id, path, pool)
+        self._provider.request(media_id, path, pool, dimension)
 
 
 def _best_grid(count: int, width: int, height: int) -> tuple[int, float, float]:

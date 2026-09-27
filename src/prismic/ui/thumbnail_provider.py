@@ -40,13 +40,14 @@ class ThumbnailProvider(QObject):
 
     def __init__(self, dimension: int = THUMBNAIL_DIMENSION, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        # Configurable rather than always `THUMBNAIL_DIMENSION`: the result
-        # list's own rows are small (`ThumbnailDelegate` uses the default),
-        # but `SelectionGridView` shows the same kind of decode at much
-        # larger cell sizes and needs its own, separately-cached, provider
-        # instance built with a bigger dimension -- see `MainWindow`.
+        # Default dimension for a plain `request()` call. `ThumbnailDelegate`
+        # relies on this default since the result list's rows are a fixed
+        # size. `SelectionGridView`'s cells are not fixed -- they grow with
+        # the window and shrink with selection count -- so it passes an
+        # explicit `dimension` per request instead; see `request()`.
         self._dimension = dimension
         self._cache: dict[int, QPixmap] = {}
+        self._decoded_at: dict[int, int] = {}
         self._pending: set[int] = set()
         self._failed: set[int] = set()
         self._watchers: list[FutureWatcher] = []
@@ -58,24 +59,43 @@ class ThumbnailProvider(QObject):
     def has_failed(self, media_id: int) -> bool:
         return media_id in self._failed
 
-    def request(self, media_id: int, path: Path, worker_pool: WorkerPool) -> None:
-        if media_id in self._cache or media_id in self._pending or media_id in self._failed:
+    def request(
+        self, media_id: int, path: Path, worker_pool: WorkerPool, dimension: int | None = None
+    ) -> None:
+        """Decode a thumbnail for `media_id`, at `dimension` (defaulting to
+        the provider's own) if not already cached at that size or larger.
+
+        A cache hit at a *smaller* dimension than requested still triggers
+        a re-decode -- letting a caller whose display size grew (a grid
+        cell after a window resize, or a selection shrinking to fewer
+        items) ask for a sharper version without needing its own
+        cache-invalidation logic. `downsample()` never upscales, so asking
+        for a dimension larger than the source image is harmless -- it
+        just decodes at the image's own resolution.
+        """
+        if media_id in self._failed:
+            return
+        target = self._dimension if dimension is None else dimension
+        if media_id in self._pending or self._decoded_at.get(media_id, 0) >= target:
             return
         self._pending.add(media_id)
         generation = self._generation
-        future = worker_pool.submit(_decode_thumbnail, path, self._dimension)
+        future = worker_pool.submit(_decode_thumbnail, path, target)
         watcher = FutureWatcher(future, self)
-        watcher.finished.connect(lambda image: self._on_done(media_id, generation, image))
+        watcher.finished.connect(lambda image: self._on_done(media_id, generation, target, image))
         self._watchers.append(watcher)
 
     def reset(self) -> None:
         self._generation += 1
         self._cache.clear()
+        self._decoded_at.clear()
         self._pending.clear()
         self._failed.clear()
         self._watchers.clear()
 
-    def _on_done(self, media_id: int, generation: int, image: QImage | None) -> None:
+    def _on_done(
+        self, media_id: int, generation: int, dimension: int, image: QImage | None
+    ) -> None:
         self._pending.discard(media_id)
         if generation != self._generation:
             return
@@ -84,4 +104,5 @@ class ThumbnailProvider(QObject):
             self.decode_failed.emit(media_id)
             return
         self._cache[media_id] = QPixmap.fromImage(image)
+        self._decoded_at[media_id] = dimension
         self.thumbnail_ready.emit(media_id)

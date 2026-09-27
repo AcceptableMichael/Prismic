@@ -96,3 +96,41 @@ def test_a_non_matching_aspect_ratio_is_letterboxed_not_cropped(qtbot: QtBot) ->
     view.set_items([(1, Path("a.jpg"))])
     view.show()
     qtbot.waitExposed(view)
+
+
+def test_the_requested_dimension_tracks_the_actual_cell_size(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """A cell's decode request must scale with how big the cell actually
+    is on screen -- a fixed decode cap either blurs a large cell (a small
+    selection in a big window) or wastes decode time on a small one (a
+    big selection), which is exactly the blurriness this test guards
+    against regressing."""
+    (tmp_path / "a.jpg").write_bytes(b"not a real image, just needs to exist")
+
+    provider = ThumbnailProvider()
+    requested_dimensions: list[int] = []
+    original_request = provider.request
+
+    def spy_request(
+        media_id: int, path: Path, worker_pool: object, dimension: int | None = None
+    ) -> None:
+        requested_dimensions.append(dimension)  # type: ignore[arg-type]
+
+    provider.request = spy_request  # type: ignore[method-assign]
+
+    pool = WorkerPool()
+    view = SelectionGridView(provider, lambda: pool)
+    qtbot.addWidget(view)
+    view.resize(1000, 1000)  # a single item gets a large cell
+    view.set_items([(1, tmp_path / "a.jpg")])
+    view.show()
+    qtbot.waitExposed(view)
+    qtbot.waitUntil(lambda: bool(requested_dimensions), timeout=2000)
+
+    # Comfortably above the old fixed 640px cap this replaced -- the cell
+    # at this window size is roughly 1000px minus margins.
+    assert requested_dimensions[-1] > 640
+
+    provider.request = original_request  # type: ignore[method-assign]
+    pool.shutdown(wait=True)
