@@ -1,3 +1,5 @@
+import pytest
+
 from prismic.application.queries.media_query import eligible_media
 from prismic.domain.media import MediaState
 from prismic.persistence.repositories.mapping_repository import MappingRepository
@@ -92,6 +94,7 @@ def test_ordering_is_deterministic_by_normalized_relative_path(
     assert [m.relative_path for m in result] == ["a/1.jpg", "b/1.jpg", "b/2.jpg"]
 
 
+@pytest.mark.slow
 def test_scales_acceptably_on_a_large_result_set(
     media: MediaRepository, mappings: MappingRepository
 ) -> None:

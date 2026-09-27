@@ -1,10 +1,36 @@
+import json
 import sqlite3
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from prismic.persistence import database, migrations
+
+_SLOW_STATE_PATH = Path(__file__).parent.parent / ".slow_test_state.json"
+_SLOW_STATE_HISTORY_LENGTH = 3
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """Track last-run time and recent durations for `@pytest.mark.slow` tests.
+
+    Written to a gitignored state file that tools/run_tests.py reads to
+    decide which slow tests are stale enough to re-run, and that an audit
+    reads to spot ones that no longer earn their `slow` mark.
+    """
+    if report.when != "call" or "slow" not in report.keywords:
+        return
+    try:
+        state = json.loads(_SLOW_STATE_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {}
+    entry = state.setdefault(report.nodeid, {"last_run": 0.0, "recent_durations": []})
+    entry["last_run"] = time.time()
+    entry["recent_durations"] = (entry["recent_durations"] + [report.duration])[
+        -_SLOW_STATE_HISTORY_LENGTH:
+    ]
+    _SLOW_STATE_PATH.write_text(json.dumps(state, indent=2))
 
 
 @pytest.fixture(autouse=True)

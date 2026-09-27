@@ -3,16 +3,20 @@ load" checklist.
 
 2,000 files is the chosen "realistic stress case" number: large enough to
 meaningfully exercise the scan/hash/reconcile pipeline and the query
-layer's sort step at a scale well beyond casual manual testing, while
-still running in a few seconds so this stays a normal part of the suite
-rather than something skipped for being slow.
+layer's sort step at a scale well beyond casual manual testing. That
+scale makes both tests here multi-second, so the module is marked
+``slow`` -- see tools/run_tests.py for how/when slow tests run.
 """
 
 import time
 from pathlib import Path
 
+import pytest
+
 from prismic.application.queries.media_query import eligible_media
 from prismic.application.session import PrismicSession
+
+pytestmark = pytest.mark.slow
 
 _FILE_COUNT = 2000
 

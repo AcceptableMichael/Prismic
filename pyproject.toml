@@ -56,3 +56,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
+markers = [
+    "slow: takes 5+ seconds; excluded from the default run, see tools/run_tests.py",
+]

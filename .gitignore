@@ -58,6 +58,9 @@ cover/
 *.mo
 *.pot
 
+# Slow-test tracking state (tools/run_tests.py, tests/conftest.py) -- local timing history, not shared.
+.slow_test_state.json
+
 # Django stuff:
 *.log
 local_settings.py

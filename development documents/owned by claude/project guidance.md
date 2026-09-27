@@ -54,6 +54,31 @@ uv add --dev <package>       # add a dev-only dependency
 
 Always commit `uv.lock` alongside `pyproject.toml` changes.
 
+## Slow-test audit
+
+See [`testing flow.md`](../owned%20by%20human/testing%20flow.md#slow-tests)
+for the policy. Every time you run the full suite via
+`uv run python tools/run_tests.py`, treat it as an audit opportunity,
+not just a test run:
+
+- **New slow tests.** If a test you wrote or touched this session took
+  a noticeable while, check its actual duration (`--durations=0`, or the
+  per-test timing pytest prints with `-v`) and mark it
+  `@pytest.mark.slow` if it's 5+ seconds. Don't wait for someone else to
+  notice the suite got slower.
+- **Demotion candidates.** Run `uv run python tools/run_tests.py --audit`
+  occasionally (it's cheap — no tests run) and look for the
+  `<-- consider removing @pytest.mark.slow` flag: three consecutive
+  recorded runs under 5 seconds. Investigate why before removing the
+  mark — machine variance can produce a false streak, and a real
+  speed-up is worth noting in a commit message, not just silently
+  unmarking.
+- **Passing `--relevant`.** When you have reason to think a slow test
+  covers something you just changed (touched the same module, same
+  data path, same behavior class), pass its nodeid via `--relevant` even
+  if it's not stale — don't rely on the 24h staleness net to catch
+  something you already suspect.
+
 If `uv` isn't on `PATH` in a given shell, it's installed via winget at
 `%LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe`; a PowerShell profile fallback
 at `Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` also adds it

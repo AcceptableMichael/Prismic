@@ -23,7 +23,30 @@ a task is considered complete**:
    that re-enters a model mid-event; this project has a history of bugs
    that only showed up here.
 3. **The full `pytest` suite** — the regression net over everything
-   else, run once the work is otherwise done.
+   else, run once the work is otherwise done. Run it via
+   `uv run python tools/run_tests.py` rather than bare `pytest`: some
+   tests are marked `slow` (5+ seconds) and excluded from a plain run —
+   see "Slow tests" below for what still gets them run.
+
+## Slow tests
+
+A handful of tests (2000-file/5000-record stress cases, currently) take
+5+ seconds each and are marked `@pytest.mark.slow`. They're excluded
+from a default `pytest` invocation so the normal loop stays fast, but
+skipping them silently forever would let a real regression sit
+undetected for arbitrarily long — so `tools/run_tests.py` still runs a
+slow test whenever **either** of these is true:
+
+- **Relevance** — Claude judges the test relevant to what changed this
+  session, and passes its nodeid via `--relevant`.
+- **Staleness** — the test hasn't been run in the last 24 hours (or has
+  never been run), tracked in the gitignored `.slow_test_state.json`.
+
+Either condition alone is enough; this is a union, not an intersection.
+Claude audits the slow-test pool as part of running tests (see
+[`project guidance.md`](../owned%20by%20claude/project%20guidance.md))
+— both for tests that should be added to it, and for ones that no
+longer earn their `slow` mark.
 
 The ordering is about cost and about what each step can catch: the
 cheapest feedback first, then the things only a real window reveals,
