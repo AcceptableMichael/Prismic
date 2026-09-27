@@ -215,6 +215,74 @@ def test_global_shortcuts_still_work_when_the_result_list_has_focus(
     assert window.item_tag_panel.search_box.hasFocus()  # loop starts over
 
 
+# -- A bare letter with nothing focused jumps straight into the Edit box --
+
+
+def test_a_letter_key_focuses_the_edit_search_box_and_types_it(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_V)
+
+    assert window.item_tag_panel.search_box.hasFocus()
+    assert window.item_tag_panel.search_box.text() == "v"
+
+
+def test_shift_plus_letter_types_the_capital(qtbot: QtBot, window: MainWindow) -> None:
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_V, Qt.KeyboardModifier.ShiftModifier)
+
+    assert window.item_tag_panel.search_box.hasFocus()
+    assert window.item_tag_panel.search_box.text() == "V"
+
+
+def test_a_modified_letter_key_does_not_hijack_typing(qtbot: QtBot, window: MainWindow) -> None:
+    """Ctrl+F is bound to full screen by default -- it must still trigger
+    that shortcut, not be swallowed as if it were plain "f" typed into the
+    Edit box."""
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.result_list, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+
+    assert window.isFullScreen()
+    assert not window.item_tag_panel.search_box.hasFocus()
+    assert window.item_tag_panel.search_box.text() == ""
+
+
+def test_a_letter_key_does_not_hijack_typing_already_in_a_search_box(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    """The redirect only fires with nothing already focused for text entry
+    -- typing into the filter box, say, must keep landing there, not jump
+    to the item-tag box mid-word."""
+    window.filter_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.filter_panel.search_box.hasFocus(), timeout=1000)
+
+    qtbot.keyClick(window.filter_panel.search_box, Qt.Key.Key_V)
+
+    assert window.filter_panel.search_box.hasFocus()
+    assert window.filter_panel.search_box.text() == "v"
+    assert window.item_tag_panel.search_box.text() == ""
+
+
+def test_a_letter_key_is_a_no_op_while_the_edit_panel_is_hidden_in_focus_mode(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    window.result_list.setFocus()
+    qtbot.waitUntil(lambda: window.result_list.hasFocus(), timeout=1000)
+    qtbot.keyClick(window.result_list, Qt.Key.Key_Space)  # enter Focus Mode
+    assert not window.item_tag_panel.isVisible()
+
+    qtbot.keyClick(window, Qt.Key.Key_V)
+
+    assert window.item_tag_panel.search_box.text() == ""
+
+
 def test_escape_dismisses_typing_focus_from_either_search_box(
     qtbot: QtBot, window: MainWindow
 ) -> None:

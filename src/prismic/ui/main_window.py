@@ -1071,6 +1071,13 @@ class MainWindow(QMainWindow):
             ):
                 event.accept()
                 return True
+            if (
+                self.session is not None
+                and not self._focus_is_text_editing()
+                and self._start_typing_in_edit_panel(event)
+            ):
+                event.accept()
+                return True
         elif event.type() == QEvent.Type.KeyRelease and isinstance(event, QKeyEvent):
             if not event.isAutoRepeat():
                 self._keys_down.discard(event.key())
@@ -1191,6 +1198,46 @@ class MainWindow(QMainWindow):
         focused = QApplication.focusWidget()
         if character is not None and isinstance(focused, QLineEdit):
             focused.insert(character)
+        return True
+
+    def _start_typing_in_edit_panel(self, event: QKeyEvent) -> bool:
+        """A plain a-z letter, pressed with no text box focused and no
+        modifier bound to some other shortcut, jumps straight into the
+        item-tag panel's search box and types the character there --
+        the same "just start typing" convention a file browser's own
+        type-ahead search uses, so a keystroke aimed at tagging doesn't
+        need Tab or a click to land anywhere first.
+
+        Only bare letters (Shift included, since that's how a capital
+        letter is typed, not a shortcut combo) qualify, and only once
+        every other binding -- Dismiss, the tag-search cycle key, a
+        rebound global shortcut, quick-select -- has already had first
+        refusal via the checks ahead of this one in `eventFilter`, so a
+        user who rebinds a shortcut onto a bare letter still gets that
+        shortcut, not this. The panel must actually be visible too: in
+        Focus Mode it's hidden, and redirecting keystrokes into a search
+        box the user can't see would be worse than doing nothing.
+
+        The letter is derived from `event.key()` plus the Shift state,
+        not from `event.text()` -- Qt's `Key_A`..`Key_Z` already line up
+        with the ASCII uppercase letters, and `text()` is a layout/IME
+        translation that isn't guaranteed to reflect Shift consistently
+        for a synthetically generated event (observed live: a `QTest`-
+        simulated Shift+V event came through with a lowercase `text()`).
+        """
+        if not self.item_tag_panel.isVisible():
+            return False
+        modifiers = event.modifiers() & ~Qt.KeyboardModifier.ShiftModifier
+        if modifiers != Qt.KeyboardModifier.NoModifier:
+            return False
+        key = event.key()
+        if not (Qt.Key.Key_A <= key <= Qt.Key.Key_Z):
+            return False
+        letter = chr(key)
+        if not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            letter = letter.lower()
+        self.item_tag_panel.focus_search()
+        self.item_tag_panel.search_box.insert(letter)
         return True
 
     def _cycle_tag_search_focus(self) -> bool:
