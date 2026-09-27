@@ -49,10 +49,19 @@ class CommandDispatcher:
 
     def undo(self) -> bool:
         """Undo the most recent command. Returns False if there was none."""
-        command = self._history.pop()
+        command = self._history.pop_undo()
         if command is None:
             return False
         self._run(command.undo)
+        return True
+
+    def redo(self) -> bool:
+        """Redo the most recently undone command. Returns False if there
+        was none."""
+        command = self._history.pop_redo()
+        if command is None:
+            return False
+        self._run(command.execute)
         return True
 
     def _run(self, apply: _CommandMethod) -> None:

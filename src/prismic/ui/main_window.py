@@ -150,6 +150,7 @@ class MainWindow(QMainWindow):
             on_navigate_previous=lambda: self._navigate(-1),
             on_navigate_next=lambda: self._navigate(1),
             on_undo=self._undo,
+            on_redo=self._redo,
             on_focus_item_tags=self.item_tag_panel.focus_search,
             on_toggle_tag_shortcut=self._on_toggle_tag_shortcut,
             on_toggle_focus_mode=self._toggle_focus_mode,
@@ -230,6 +231,10 @@ class MainWindow(QMainWindow):
         self.panel_toolbar.setFixedHeight(self.item_tag_panel.title_label.sizeHint().height())
         self.panel_toolbar.shuffle_button.toggled.connect(self._apply_shuffle_mode)
         self.panel_toolbar.fullscreen_button.toggled.connect(self._apply_true_fullscreen)
+        self.panel_toolbar.undo_button.clicked.connect(self._undo)
+        self.panel_toolbar.redo_button.clicked.connect(self._redo)
+        self.panel_toolbar.undo_button.setEnabled(False)
+        self.panel_toolbar.redo_button.setEnabled(False)
 
         self._left_column = QWidget()
         left_column_layout = QVBoxLayout(self._left_column)
@@ -310,6 +315,12 @@ class MainWindow(QMainWindow):
         )
         self._hover_hints.register_widget(
             self.filter_panel.header, shortcuts.FOCUS_TAG_SEARCH, "Cycle between edit and filter"
+        )
+        self._hover_hints.register_static(
+            self.panel_toolbar.undo_button, ("Ctrl", "Z"), "Undo the last tag change"
+        )
+        self._hover_hints.register_static(
+            self.panel_toolbar.redo_button, ("Ctrl", "Y"), "Redo the last undone tag change"
         )
         self._hover_hints.register_widget(
             self.panel_toolbar.shuffle_button,
@@ -616,6 +627,8 @@ class MainWindow(QMainWindow):
         self._sync_result_selection()
         self._show_current_media()
         self._refresh_item_tag_panel(tags)
+        self.panel_toolbar.undo_button.setEnabled(self.session.history.can_undo())
+        self.panel_toolbar.redo_button.setEnabled(self.session.history.can_redo())
 
     def _reordered_by_shuffle(self, media_list: list[Media]) -> list[Media]:
         """`media_list` (in the query layer's own deterministic path
@@ -765,6 +778,12 @@ class MainWindow(QMainWindow):
         self.session.undo()
         self._refresh_all()
 
+    def _redo(self) -> None:
+        if self.session is None:
+            return
+        self.session.redo()
+        self._refresh_all()
+
     def _on_filter_toggle(self, tag_id: int) -> None:
         if self.session is None:
             return
@@ -774,6 +793,7 @@ class MainWindow(QMainWindow):
         else:
             self.session.execute(FilterSelectCommand(tag_id=tag_id))
         self._refresh_all()
+        self.filter_panel.clear_search_keep_focus()
 
     def _on_tag_create(self, name: str) -> None:
         if self.session is None:
@@ -812,6 +832,7 @@ class MainWindow(QMainWindow):
         else:
             self.session.execute(MappingAddCommand(media_id=current, tag_id=tag_id))
         self._refresh_all()
+        self.item_tag_panel.clear_search_keep_focus()
 
     def _on_item_tag_hover(self, row: int | None) -> None:
         if row is None:

@@ -1,14 +1,18 @@
 """The small toolbar row above the item-tags panel.
 
-Two view toggles that don't belong in the View menu alongside Focus Mode
-and Show Thumbnails, because both are specifically about *this* row's
-neighborhood -- shuffling the very list Focus Mode/thumbnails already
-govern, and a screen-filling mode independent enough from Focus Mode
-(which only hides side panels, keeping the normal window frame) that
-conflating the two would be confusing. See `MainWindow._build_ui` for how
-this row is sized to match the panel title's own height, and
-`MainWindow._apply_shuffle_mode`/`_apply_true_fullscreen` for what the
-two buttons actually do.
+Two checkable view toggles that don't belong in the View menu alongside
+Focus Mode and Show Thumbnails, because both are specifically about
+*this* row's neighborhood -- shuffling the very list Focus Mode/
+thumbnails already govern, and a screen-filling mode independent enough
+from Focus Mode (which only hides side panels, keeping the normal window
+frame) that conflating the two would be confusing. See
+`MainWindow._build_ui` for how this row is sized to match the panel
+title's own height, and `MainWindow._apply_shuffle_mode`/
+`_apply_true_fullscreen` for what the two buttons actually do.
+
+Undo/redo share the row too, to its left -- momentary actions rather
+than view toggles (see `_ActionIconButton`), wired to `MainWindow._undo`/
+`_redo` and enabled/disabled from `History.can_undo()`/`can_redo()`.
 """
 
 from __future__ import annotations
@@ -69,6 +73,61 @@ class _ToggleIconButton(QToolButton):
 
     def _paint_icon(self, painter: QPainter, rect: QRect) -> None:
         raise NotImplementedError
+
+
+class _ActionIconButton(QToolButton):
+    """A plain (non-checkable) hand-painted icon button -- same visual
+    language as `_ToggleIconButton`, but for a momentary action (undo,
+    redo) rather than a persistent view toggle, so it has no checked
+    state at all: just enabled/disabled, greyed out via Qt's own
+    disabled-widget styling when there's nothing to do."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("panelToolbarButton")
+        self.setFixedSize(_BUTTON_SIZE, _BUTTON_SIZE)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = theme.TEXT_SECONDARY if self.isEnabled() else theme.BORDER
+        painter.setPen(QPen(QColor(color), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        rect = self.rect().adjusted(_ICON_MARGIN, _ICON_MARGIN, -_ICON_MARGIN, -_ICON_MARGIN)
+        self._paint_icon(painter, rect)
+
+    def _paint_icon(self, painter: QPainter, rect: QRect) -> None:
+        raise NotImplementedError
+
+
+def _paint_chevron(painter: QPainter, rect: QRect, *, pointing_left: bool) -> None:
+    cx, cy = rect.center().x(), rect.center().y()
+    half_w = rect.width() * 0.28
+    half_h = rect.height() * 0.34
+    near_x = cx + half_w if pointing_left else cx - half_w
+    far_x = cx - half_w if pointing_left else cx + half_w
+    path = QPainterPath()
+    path.moveTo(near_x, cy - half_h)
+    path.lineTo(far_x, cy)
+    path.lineTo(near_x, cy + half_h)
+    painter.drawPath(path)
+
+
+class UndoButton(_ActionIconButton):
+    """A plain left-pointing chevron, the conventional "back"/"undo" glyph."""
+
+    def _paint_icon(self, painter: QPainter, rect: QRect) -> None:
+        _paint_chevron(painter, rect, pointing_left=True)
+
+
+class RedoButton(_ActionIconButton):
+    """A plain right-pointing chevron, the conventional "forward"/"redo"
+    glyph -- the mirror image of `UndoButton`."""
+
+    def _paint_icon(self, painter: QPainter, rect: QRect) -> None:
+        _paint_chevron(painter, rect, pointing_left=False)
 
 
 class ShuffleButton(_ToggleIconButton):
@@ -164,12 +223,20 @@ class PanelToolbar(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("panelToolbar")
+        # Undo/redo sit to the left of shuffle/full-screen -- a distinct
+        # group (momentary actions rather than view toggles), but sharing
+        # this row rather than a bar of its own since it's just as much
+        # about "this row's neighborhood" as the other two.
+        self.undo_button = UndoButton(self)
+        self.redo_button = RedoButton(self)
         self.shuffle_button = ShuffleButton(self)
         self.fullscreen_button = FullScreenButton(self)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 0, 8, 0)
         layout.setSpacing(6)
+        layout.addWidget(self.undo_button)
+        layout.addWidget(self.redo_button)
         layout.addWidget(self.shuffle_button)
         layout.addWidget(self.fullscreen_button)
         layout.addStretch(1)

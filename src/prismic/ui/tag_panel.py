@@ -118,6 +118,16 @@ class TagPanel(QWidget):
         self.search_box.setFocus()
         self.search_box.selectAll()
 
+    def clear_search_keep_focus(self) -> None:
+        """Clear the search box after a tag toggle, no matter what
+        triggered it (row click, quick-select shortcut, or Enter-to-
+        create) -- restoring focus explicitly rather than trusting that
+        `clear()` alone leaves it in place."""
+        had_focus = self.search_box.hasFocus()
+        self.search_box.clear()
+        if had_focus:
+            self.search_box.setFocus()
+
     def set_shortcut_mode_selected(self, selected: bool) -> None:
         """Only meaningful for a panel constructed with `show_shortcuts`;
         a no-op otherwise since the delegate never reads the flag it'd
@@ -152,7 +162,7 @@ class TagPanel(QWidget):
             self.toggle_requested.emit(matches[0].id)
         else:
             self.create_and_check_requested.emit(query)
-        self.search_box.clear()
+        self.clear_search_keep_focus()
 
 
 def _is_fuzzy_match(query: str, text: str) -> bool:

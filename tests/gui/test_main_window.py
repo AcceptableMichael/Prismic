@@ -290,6 +290,42 @@ def test_in_viewer_tag_toggle_maps_the_current_item(
     assert window.session.mappings.tags_for_media(current_id) == []  # type: ignore[union-attr]
 
 
+def test_item_tag_toggle_clears_its_search_box_without_losing_focus(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    _open_and_wait(qtbot, window, collection_dir)
+    window._on_tag_create("vacation")
+    tag = window.session.tags.list_all()[0]  # type: ignore[union-attr]
+    current_id = window.session.state.result_set[0]  # type: ignore[union-attr]
+    window.session.state.current_item = current_id  # type: ignore[union-attr]
+    window._refresh_all()
+    window.item_tag_panel.search_box.setText("vac")
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+
+    window._on_item_tag_toggle(tag.id)
+
+    assert window.item_tag_panel.search_box.text() == ""
+    assert window.item_tag_panel.search_box.hasFocus()
+
+
+def test_filter_toggle_clears_its_search_box_without_losing_focus(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    _open_and_wait(qtbot, window, collection_dir)
+    window._on_tag_create("vacation")
+    tag = window.session.tags.list_all()[0]  # type: ignore[union-attr]
+    window._refresh_all()
+    window.filter_panel.search_box.setText("vac")
+    window.filter_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.filter_panel.search_box.hasFocus(), timeout=1000)
+
+    window._on_filter_toggle(tag.id)
+
+    assert window.filter_panel.search_box.text() == ""
+    assert window.filter_panel.search_box.hasFocus()
+
+
 def test_item_tag_hover_shows_digit_hint_within_the_shortcut_group(
     qtbot: QtBot, window: MainWindow, collection_dir: Path
 ) -> None:

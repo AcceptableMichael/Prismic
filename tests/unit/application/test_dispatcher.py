@@ -84,6 +84,30 @@ def test_multiple_sequential_undos_unwind_in_reverse_order(
     assert dispatcher.undo() is False  # nothing left to undo
 
 
+def test_undo_then_redo_reapplies_the_command(
+    dispatcher: CommandDispatcher, tags: TagRepository
+) -> None:
+    dispatcher.execute(TagCreateCommand(name="vacation"))
+    dispatcher.undo()
+    assert tags.list_all() == []
+
+    assert dispatcher.redo() is True
+    assert [t.name for t in tags.list_all()] == ["vacation"]
+
+    assert dispatcher.redo() is False  # nothing left to redo
+
+
+def test_a_fresh_command_clears_the_redo_stack(
+    dispatcher: CommandDispatcher, tags: TagRepository
+) -> None:
+    dispatcher.execute(TagCreateCommand(name="first"))
+    dispatcher.undo()
+    assert dispatcher.redo() is True
+
+    dispatcher.execute(TagCreateCommand(name="second"))
+    assert dispatcher.redo() is False
+
+
 def test_a_failed_command_publishes_no_partial_mutation(
     dispatcher: CommandDispatcher,
     state: ApplicationState,

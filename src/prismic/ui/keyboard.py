@@ -19,6 +19,16 @@ caret, so result-list navigation stays reachable even while a tag search/
 rename box has focus -- see the `text_editing` branch below. Quick-select
 tag shortcuts are a second, narrower exception -- see below.
 
+Undo/redo are a third: `MainWindow`'s event filter runs ahead of the
+focused widget (it's installed on the whole `QApplication`, not this
+window), so `handle_key_press` sees Ctrl+Z/Ctrl+Y before Qt's own
+`QLineEdit` would ever get a chance to run its *own* built-in undo/redo
+on the typed text -- returning True here for both, even while
+`text_editing`, is what stops that from happening. Undo/redo are global
+tag-history commands, not text-editing ones, so they never touch the
+text a search/rename box holds; the app-level history is the only thing
+either key can affect, no matter what has focus.
+
 The tag-search cycle shortcut (Tab by default) fires immediately, in
 `MainWindow.eventFilter`, with no chord/timeout involved -- once focus
 actually lands in that search box (a QLineEdit), `text_editing` becomes
@@ -172,6 +182,7 @@ class KeyboardController(QObject):
         on_navigate_previous: Callable[[], None],
         on_navigate_next: Callable[[], None],
         on_undo: Callable[[], None],
+        on_redo: Callable[[], None],
         on_focus_item_tags: Callable[[], None],
         on_toggle_tag_shortcut: Callable[[int], None],
         on_toggle_focus_mode: Callable[[], None],
@@ -204,12 +215,14 @@ class KeyboardController(QObject):
             shortcuts.SHUFFLE_RESULTS: on_shuffle_results,
             shortcuts.TRUE_FULLSCREEN: on_true_fullscreen,
         }
-        # Undo is the one global command with no entry in `SHORTCUTS`:
-        # Ctrl+Z is a platform-level editing convention rather than an
-        # app-specific binding, and Qt's own text widgets implement it
-        # themselves with no way to rebind theirs to match. Offering to
-        # rebind only half of it would be worse than not offering at all.
+        # Undo/redo are the two global commands with no entry in
+        # `SHORTCUTS`: Ctrl+Z/Ctrl+Y are platform-level editing
+        # conventions rather than app-specific bindings, and Qt's own
+        # text widgets implement their own versions with no way to
+        # rebind theirs to match. Offering to rebind only half of either
+        # would be worse than not offering at all.
         self._on_undo = on_undo
+        self._on_redo = on_redo
 
         self._resolver = InputResolver()
         self._resolver.register(InputContext.GLOBAL_COMMAND, self._handle_global_key)
@@ -234,10 +247,10 @@ class KeyboardController(QObject):
 
         `text_editing` is whether a text-entry widget currently has focus
         (a tag search/create box, an inline rename editor, ...). While
-        true, only the two "works while typing" navigation shortcuts are
-        honored, so normal typing works -- `MainWindow.eventFilter`
-        handles quick-select keys itself in that case, ahead of ever
-        calling in here (see this module's docstring for why)."""
+        true, only the two "works while typing" navigation shortcuts and
+        undo/redo are honored, so normal typing works -- `MainWindow.
+        eventFilter` handles quick-select keys itself in that case, ahead
+        of ever calling in here (see this module's docstring for why)."""
         pressed = key_text(event)
         if pressed is None:
             return False
@@ -249,15 +262,23 @@ class KeyboardController(QObject):
                 if self._bindings.binding(shortcut_id) == pressed:
                     self._commands[shortcut_id]()
                     return True
-            return False
+            return self._handle_undo_redo(pressed)
         slot = self._bindings.quick_select_slot(pressed)
         if slot is not None:
             self._on_toggle_tag_shortcut(slot)
             return True
+        if self._handle_undo_redo(pressed):
+            return True
+        return self._resolver.dispatch(InputEvent(key=pressed))
+
+    def _handle_undo_redo(self, pressed: str) -> bool:
         if pressed == "Ctrl+Z":
             self._on_undo()
             return True
-        return self._resolver.dispatch(InputEvent(key=pressed))
+        if pressed == "Ctrl+Y":
+            self._on_redo()
+            return True
+        return False
 
     def _handle_global_key(self, event: InputEvent) -> bool:
         shortcut_id = self._bindings.shortcut_for(event.key)

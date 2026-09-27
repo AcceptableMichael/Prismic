@@ -35,9 +35,18 @@ class HoverHintController(QObject):
         self._bar = bar
         self._bindings = bindings
         self._hints: dict[QObject, tuple[str, str]] = {}
+        self._static_hints: dict[QObject, tuple[tuple[str, ...], str]] = {}
 
     def register_widget(self, widget: QWidget, shortcut_id: str, text: str) -> None:
         self._hints[widget] = (shortcut_id, text)
+        widget.installEventFilter(self)
+
+    def register_static(self, widget: QWidget, keys: tuple[str, ...], text: str) -> None:
+        """Like `register_widget`, but for a hint whose keys aren't a
+        rebindable `ShortcutBindings` entry -- undo/redo, which follow a
+        fixed platform convention (see `keyboard.py`'s module docstring)
+        rather than living in the shortcut registry."""
+        self._static_hints[widget] = (keys, text)
         widget.installEventFilter(self)
 
     def register_action(self, action: QAction, menu: QMenu, shortcut_id: str, text: str) -> None:
@@ -52,6 +61,13 @@ class HoverHintController(QObject):
         if hint is not None:
             if event.type() == QEvent.Type.Enter:
                 self._show(*hint)
+            elif event.type() == QEvent.Type.Leave:
+                self._bar.clear()
+            return False
+        static_hint = self._static_hints.get(watched)
+        if static_hint is not None:
+            if event.type() == QEvent.Type.Enter:
+                self._bar.show_hint(*static_hint)
             elif event.type() == QEvent.Type.Leave:
                 self._bar.clear()
         return False

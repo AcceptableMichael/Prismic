@@ -47,6 +47,45 @@ def test_the_toolbar_has_a_shuffle_and_a_fullscreen_button(window: MainWindow) -
     assert not window.panel_toolbar.fullscreen_button.isChecked()
 
 
+def test_the_toolbar_has_undo_and_redo_buttons_disabled_with_no_history(window: MainWindow) -> None:
+    assert not window.panel_toolbar.undo_button.isCheckable()
+    assert not window.panel_toolbar.redo_button.isCheckable()
+    assert not window.panel_toolbar.undo_button.isEnabled()
+    assert not window.panel_toolbar.redo_button.isEnabled()
+
+
+def test_a_tag_change_enables_undo_and_a_click_reverts_it(
+    qtbot: QtBot, open_window: MainWindow
+) -> None:
+    session = open_window.session
+    assert session is not None
+
+    open_window._on_tag_create("vacation")
+    assert open_window.panel_toolbar.undo_button.isEnabled()
+    assert not open_window.panel_toolbar.redo_button.isEnabled()
+
+    qtbot.mouseClick(open_window.panel_toolbar.undo_button, Qt.MouseButton.LeftButton)
+
+    assert session.tags.list_all() == []
+    assert not open_window.panel_toolbar.undo_button.isEnabled()
+    assert open_window.panel_toolbar.redo_button.isEnabled()
+
+
+def test_a_click_on_redo_reapplies_the_undone_change(
+    qtbot: QtBot, open_window: MainWindow
+) -> None:
+    session = open_window.session
+    assert session is not None
+    open_window._on_tag_create("vacation")
+    qtbot.mouseClick(open_window.panel_toolbar.undo_button, Qt.MouseButton.LeftButton)
+
+    qtbot.mouseClick(open_window.panel_toolbar.redo_button, Qt.MouseButton.LeftButton)
+
+    assert [t.name for t in session.tags.list_all()] == ["vacation"]
+    assert open_window.panel_toolbar.undo_button.isEnabled()
+    assert not open_window.panel_toolbar.redo_button.isEnabled()
+
+
 def test_the_toolbar_matches_the_panel_titles_own_height(window: MainWindow) -> None:
     """ "The same height as the box containing the label 'Edit this
     file'" -- queried from that label directly rather than a hard-coded

@@ -80,6 +80,9 @@ class PrismicSession:
     def undo(self) -> bool:
         return self.dispatcher.undo()
 
+    def redo(self) -> bool:
+        return self.dispatcher.redo()
+
     def rescan(self, on_progress: ProgressCallback | None = None) -> Future[ReconciliationResult]:
         """Kick off a fresh background scan/hash/reconcile pass.
 

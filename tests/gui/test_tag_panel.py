@@ -89,6 +89,36 @@ def test_enter_with_empty_search_does_nothing(qtbot: QtBot) -> None:
     assert created == []
 
 
+def test_clear_search_keep_focus_restores_focus_if_it_had_it(qtbot: QtBot) -> None:
+    panel = TagPanel("Item tags")
+    qtbot.addWidget(panel)
+    panel.show()
+    qtbot.waitExposed(panel)
+    panel.search_box.setText("sun")
+    panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: panel.search_box.hasFocus(), timeout=1000)
+
+    panel.clear_search_keep_focus()
+
+    assert panel.search_box.text() == ""
+    assert panel.search_box.hasFocus()
+
+
+def test_clear_search_keep_focus_does_not_steal_focus_if_it_lacked_it(qtbot: QtBot) -> None:
+    panel = TagPanel("Item tags")
+    qtbot.addWidget(panel)
+    panel.show()
+    qtbot.waitExposed(panel)
+    panel.search_box.setText("sun")
+    panel.list_view.setFocus()
+    qtbot.waitUntil(lambda: panel.list_view.hasFocus(), timeout=1000)
+
+    panel.clear_search_keep_focus()
+
+    assert panel.search_box.text() == ""
+    assert not panel.search_box.hasFocus()
+
+
 def test_focus_search_gives_the_search_box_focus(qtbot: QtBot) -> None:
     panel = TagPanel("Item tags")
     qtbot.addWidget(panel)

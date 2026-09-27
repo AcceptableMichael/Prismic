@@ -13,14 +13,14 @@ class _RecordingCommand(Command):
         pass
 
 
-def test_pop_on_empty_history_returns_none() -> None:
+def test_pop_undo_on_empty_history_returns_none() -> None:
     history = History()
 
-    assert history.pop() is None
+    assert history.pop_undo() is None
     assert history.can_undo() is False
 
 
-def test_push_then_pop_is_lifo() -> None:
+def test_push_then_pop_undo_is_lifo() -> None:
     history = History()
     first = _RecordingCommand("first")
     second = _RecordingCommand("second")
@@ -28,9 +28,9 @@ def test_push_then_pop_is_lifo() -> None:
     history.push(first)
     history.push(second)
 
-    assert history.pop() is second
-    assert history.pop() is first
-    assert history.pop() is None
+    assert history.pop_undo() is second
+    assert history.pop_undo() is first
+    assert history.pop_undo() is None
 
 
 def test_can_undo_reflects_stack_contents() -> None:
@@ -40,7 +40,7 @@ def test_can_undo_reflects_stack_contents() -> None:
     history.push(_RecordingCommand("a"))
     assert history.can_undo() is True
 
-    history.pop()
+    history.pop_undo()
     assert history.can_undo() is False
 
 
@@ -51,5 +51,37 @@ def test_len_reflects_stack_size() -> None:
 
     assert len(history) == 2
 
-    history.pop()
+    history.pop_undo()
     assert len(history) == 1
+
+
+def test_pop_redo_on_empty_history_returns_none() -> None:
+    history = History()
+
+    assert history.pop_redo() is None
+    assert history.can_redo() is False
+
+
+def test_undo_then_redo_is_lifo() -> None:
+    history = History()
+    first = _RecordingCommand("first")
+    second = _RecordingCommand("second")
+    history.push(first)
+    history.push(second)
+
+    history.pop_undo()
+    assert history.can_redo() is True
+
+    assert history.pop_redo() is second
+    assert history.pop_redo() is None
+    assert history.can_undo() is True
+
+
+def test_new_command_clears_redo_stack() -> None:
+    history = History()
+    history.push(_RecordingCommand("a"))
+    history.pop_undo()
+    assert history.can_redo() is True
+
+    history.push(_RecordingCommand("b"))
+    assert history.can_redo() is False

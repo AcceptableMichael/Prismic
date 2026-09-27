@@ -133,6 +133,45 @@ def test_undo_shortcut_reverts_the_last_command(qtbot: QtBot, window: MainWindow
     assert session.tags.list_all() == []
 
 
+def test_redo_shortcut_reapplies_the_last_undone_command(qtbot: QtBot, window: MainWindow) -> None:
+    session = window.session
+    assert session is not None
+    window._on_tag_create("vacation")
+    assert len(session.tags.list_all()) == 1
+
+    qtbot.keyClick(window, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    assert session.tags.list_all() == []
+
+    qtbot.keyClick(window, Qt.Key.Key_Y, Qt.KeyboardModifier.ControlModifier)
+    assert len(session.tags.list_all()) == 1
+
+
+def test_undo_and_redo_do_not_touch_a_focused_search_box_while_reverting_tag_history(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    """Ctrl+Z/Ctrl+Y must never fall through to a focused `QLineEdit`'s
+    own built-in text-undo -- they're global tag-history commands, not
+    text-editing ones, no matter what has focus."""
+    session = window.session
+    assert session is not None
+    window._on_tag_create("vacation")
+    assert len(session.tags.list_all()) == 1
+
+    window.item_tag_panel.search_box.setFocus()
+    qtbot.waitUntil(lambda: window.item_tag_panel.search_box.hasFocus(), timeout=1000)
+    qtbot.keyClicks(window.item_tag_panel.search_box, "abc")
+    assert window.item_tag_panel.search_box.text() == "abc"
+
+    search_box = window.item_tag_panel.search_box
+    qtbot.keyClick(search_box, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    assert session.tags.list_all() == []  # the tag-history undo fired
+    assert search_box.text() == "abc"  # the typed text is untouched
+
+    qtbot.keyClick(search_box, Qt.Key.Key_Y, Qt.KeyboardModifier.ControlModifier)
+    assert len(session.tags.list_all()) == 1  # the tag-history redo fired
+    assert search_box.text() == "abc"  # still untouched
+
+
 def test_global_shortcuts_still_work_when_the_result_list_has_focus(
     qtbot: QtBot, window: MainWindow
 ) -> None:
