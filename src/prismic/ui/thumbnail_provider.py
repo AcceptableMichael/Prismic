@@ -27,19 +27,25 @@ from prismic.ui.future_watcher import FutureWatcher
 THUMBNAIL_DIMENSION = 160
 
 
-def _decode_thumbnail(path: Path) -> QImage | None:
+def _decode_thumbnail(path: Path, dimension: int) -> QImage | None:
     outcome = load_image(path)
     if isinstance(outcome, ImageLoadError):
         return None
-    return downsample(outcome, THUMBNAIL_DIMENSION)
+    return downsample(outcome, dimension)
 
 
 class ThumbnailProvider(QObject):
     thumbnail_ready = Signal(int)  # media_id
     decode_failed = Signal(int)  # media_id -- lets the delegate stop retrying
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, dimension: int = THUMBNAIL_DIMENSION, parent: QObject | None = None) -> None:
         super().__init__(parent)
+        # Configurable rather than always `THUMBNAIL_DIMENSION`: the result
+        # list's own rows are small (`ThumbnailDelegate` uses the default),
+        # but `SelectionGridView` shows the same kind of decode at much
+        # larger cell sizes and needs its own, separately-cached, provider
+        # instance built with a bigger dimension -- see `MainWindow`.
+        self._dimension = dimension
         self._cache: dict[int, QPixmap] = {}
         self._pending: set[int] = set()
         self._failed: set[int] = set()
@@ -57,7 +63,7 @@ class ThumbnailProvider(QObject):
             return
         self._pending.add(media_id)
         generation = self._generation
-        future = worker_pool.submit(_decode_thumbnail, path)
+        future = worker_pool.submit(_decode_thumbnail, path, self._dimension)
         watcher = FutureWatcher(future, self)
         watcher.finished.connect(lambda image: self._on_done(media_id, generation, image))
         self._watchers.append(watcher)

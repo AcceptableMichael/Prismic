@@ -16,9 +16,11 @@ sophisticated, deliberately, per the product ask.
 
 Thumbnail decoding is delegated entirely to `ThumbnailProvider` -- the
 same async, cached, worker-pool-backed decoder the result list's own
-thumbnails use -- so showing a grid of already-visible selected items
-costs nothing beyond what the list's own thumbnails would have decoded
-anyway.
+thumbnails use, just constructed with a larger `dimension` (see
+`GRID_THUMBNAIL_DIMENSION`) and its own separate cache/instance (see
+`MainWindow.grid_thumbnail_provider`) -- a grid cell is routinely
+several hundred pixels across, well past where the result list's own
+160px thumbnails read as visibly soft once stretched to fill one.
 """
 
 from __future__ import annotations
@@ -38,6 +40,14 @@ from prismic.ui.thumbnail_provider import ThumbnailProvider
 
 _MARGIN = 12
 _SPACING = 6
+
+GRID_THUMBNAIL_DIMENSION = 640
+"""Longer-side decode cap for grid cells -- well above the result list's
+own 160px thumbnails (see `ThumbnailProvider`'s docstring), sized to stay
+sharp for the cell sizes a normal selection/window actually produces
+without decoding every selected file at full original resolution (which
+`MediaViewer`'s single-item path already does, but doing that for
+potentially dozens of selected files at once would be wasteful)."""
 
 
 class SelectionGridView(QWidget):

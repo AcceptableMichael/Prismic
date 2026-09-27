@@ -79,7 +79,7 @@ from prismic.ui.panel_toolbar import PanelToolbar
 from prismic.ui.result_list_view import ResultListView
 from prismic.ui.result_model import MediaIdRole, ResultListModel
 from prismic.ui.scan_progress_bar import ScanProgressBar
-from prismic.ui.selection_grid_view import SelectionGridView
+from prismic.ui.selection_grid_view import GRID_THUMBNAIL_DIMENSION, SelectionGridView
 from prismic.ui.settings_dialog import SettingsDialog
 from prismic.ui.tag_model import CheckedRole, CheckedSlotRole, UncheckedSlotRole
 from prismic.ui.tag_panel import TagPanel
@@ -250,9 +250,18 @@ class MainWindow(QMainWindow):
         left_column_layout.addWidget(self.panel_toolbar)
         left_column_layout.addWidget(self._tag_splitter, 1)
 
-        self.thumbnail_provider = ThumbnailProvider(self)
+        self.thumbnail_provider = ThumbnailProvider(parent=self)
         self.thumbnail_provider.thumbnail_ready.connect(self._on_thumbnail_ready)
         self.thumbnail_provider.decode_failed.connect(self._on_thumbnail_ready)
+        # A separate, larger-decode instance for the selection grid --
+        # not the same one the result list's small rows use, since that
+        # one's `THUMBNAIL_DIMENSION` (160px) reads as visibly blurry once
+        # stretched across a grid cell that's often several hundred pixels
+        # wide. Its own cache means switching between the list's thumbnail
+        # and the grid's larger one for the same file never collide.
+        self.grid_thumbnail_provider = ThumbnailProvider(
+            dimension=GRID_THUMBNAIL_DIMENSION, parent=self
+        )
 
         self.result_model = ResultListModel(self)
         self.result_list = ResultListView()
@@ -285,7 +294,7 @@ class MainWindow(QMainWindow):
         )
         self.viewer.load_error.connect(self._on_viewer_error)
         self.selection_grid = SelectionGridView(
-            self.thumbnail_provider,
+            self.grid_thumbnail_provider,
             lambda: self.session.worker_pool if self.session is not None else None,
         )
         # Swaps between the single-item viewer and the multi-select grid --
@@ -642,22 +651,25 @@ class MainWindow(QMainWindow):
 
     def _selection_or_current(self) -> frozenset[int]:
         """`state.selected_items`, falling back to `{state.current_item}`
-        when it's empty but a current item is set.
+        when it's empty *or* stale relative to `current_item`.
 
         `ApplicationState.recompute()` keeps the two in sync (`current_item`
         is always a member of `selected_items`) for any change that goes
         through a command, but code that pokes `state.current_item`
         directly without a `recompute()` in between -- mainly tests
         exercising a single-item scenario the old way -- would otherwise
-        see every selection-aware code path below treat that as "nothing
-        selected." This is what keeps that legacy pattern working without
-        forcing every caller to also set `selected_items`.
+        see every selection-aware code path below either treat that as
+        "nothing selected" (empty `selected_items`) or, worse, keep
+        reading a *stale* `selected_items` left over from before
+        `current_item` changed, silently acting on the wrong file. This is
+        what keeps that legacy direct-assignment pattern working without
+        forcing every caller to also set `selected_items` in lockstep.
         """
         assert self.session is not None
         selected = self.session.state.selected_items
-        if selected:
-            return selected
         current = self.session.state.current_item
+        if selected and (current is None or current in selected):
+            return selected
         return frozenset({current}) if current is not None else frozenset()
 
     def _refresh_all(self) -> None:
@@ -857,9 +869,10 @@ class MainWindow(QMainWindow):
         if self.session is None:
             return
         selection_model = self.result_list.selectionModel()
+        selected_indexes = selection_model.selectedIndexes()
         selected_ids = frozenset(
             media_id
-            for index in selection_model.selectedIndexes()
+            for index in selected_indexes
             if isinstance(media_id := self.result_model.data(index, MediaIdRole), int)
         )
         current_index = selection_model.currentIndex()
@@ -868,10 +881,22 @@ class MainWindow(QMainWindow):
             if current_index.isValid()
             else None
         )
-        if not isinstance(current_id, int):
-            current_id = next(iter(selected_ids)) if selected_ids else None
-        if current_id is not None:
-            selected_ids = selected_ids | {current_id}
+        if not isinstance(current_id, int) or current_id not in selected_ids:
+            # Qt's own current index (the keyboard-focus rectangle) doesn't
+            # always land on a still-selected row -- ctrl-clicking to
+            # *deselect* the current row still moves current there, per
+            # Qt's own default handling, even though it just left the
+            # selected set. Falling back to the lowest-row selected item
+            # keeps `current_item` meaningful for single-item display (see
+            # `_show_current_media`) and keeps the invariant `current_item`
+            # is always a member of `selected_items` true here too, the
+            # same invariant `ApplicationState.recompute()` enforces for
+            # every non-interactive change.
+            current_id = None
+            if selected_indexes:
+                lowest = min(selected_indexes, key=lambda index: index.row())
+                lowest_id = self.result_model.data(lowest, MediaIdRole)
+                current_id = lowest_id if isinstance(lowest_id, int) else None
         if (
             selected_ids == self.session.state.selected_items
             and current_id == self.session.state.current_item

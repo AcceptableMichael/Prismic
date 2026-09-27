@@ -66,7 +66,7 @@ def test_plain_click_selects_only_that_row(qtbot: QtBot) -> None:
     assert _selected_rows(view) == [3]
 
 
-def test_ctrl_click_adds_without_deselecting(qtbot: QtBot) -> None:
+def test_ctrl_click_adds_an_unselected_row(qtbot: QtBot) -> None:
     view = _build(qtbot)
 
     _click(qtbot, view, 1)
@@ -75,15 +75,25 @@ def test_ctrl_click_adds_without_deselecting(qtbot: QtBot) -> None:
     assert _selected_rows(view) == [1, 3]
 
 
-def test_ctrl_click_on_an_already_selected_row_does_not_deselect_it(qtbot: QtBot) -> None:
-    """Unlike Qt's default ctrl-click (a toggle, which can deselect),
-    ctrl-click here is additive-only."""
+def test_ctrl_click_on_an_already_selected_row_deselects_it(qtbot: QtBot) -> None:
+    """Ctrl-click is a full toggle, same as Qt's own default -- the one
+    respect in which this view doesn't override the default behavior."""
     view = _build(qtbot)
 
     _click(qtbot, view, 2)
     _click(qtbot, view, 2, Qt.KeyboardModifier.ControlModifier)
 
-    assert _selected_rows(view) == [2]
+    assert _selected_rows(view) == []
+
+
+def test_ctrl_click_deselecting_one_row_leaves_others_selected(qtbot: QtBot) -> None:
+    view = _build(qtbot)
+
+    _click(qtbot, view, 1)
+    _click(qtbot, view, 3, Qt.KeyboardModifier.ControlModifier)  # 1 and 3 selected
+    _click(qtbot, view, 1, Qt.KeyboardModifier.ControlModifier)  # deselect 1
+
+    assert _selected_rows(view) == [3]
 
 
 def test_shift_click_selects_inclusive_range_from_nearest_selected(qtbot: QtBot) -> None:

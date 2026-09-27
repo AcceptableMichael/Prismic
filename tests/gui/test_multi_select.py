@@ -93,6 +93,25 @@ def test_ctrl_click_through_the_real_list_selects_both_and_shows_the_grid(
     assert window._media_stack.currentWidget() is window.selection_grid
 
 
+def test_ctrl_click_on_a_selected_row_deselects_it_and_falls_back_to_the_viewer(
+    qtbot: QtBot, window: MainWindow, collection_dir: Path
+) -> None:
+    """Deselecting the row that was `current_item` (the just-clicked one)
+    must not leave `current_item` pointing at a no-longer-selected id --
+    it has to fall back to whatever's still selected, so single-item
+    display resumes showing the right file."""
+    _open_and_wait(qtbot, window, collection_dir)
+    first_id, _second_id = window.session.state.result_set  # type: ignore[union-attr]
+
+    _click(qtbot, window, 0, Qt.KeyboardModifier.NoModifier)
+    _click(qtbot, window, 1, Qt.KeyboardModifier.ControlModifier)  # both selected, row 1 current
+    _click(qtbot, window, 1, Qt.KeyboardModifier.ControlModifier)  # deselect row 1
+
+    assert window.session.state.selected_items == frozenset({first_id})  # type: ignore[union-attr]
+    assert window.session.state.current_item == first_id  # type: ignore[union-attr]
+    assert window._media_stack.currentWidget() is window.viewer
+
+
 def test_a_later_plain_click_collapses_back_to_a_single_item(
     qtbot: QtBot, window: MainWindow, collection_dir: Path
 ) -> None:
