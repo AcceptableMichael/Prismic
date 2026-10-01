@@ -126,3 +126,26 @@ def test_suppressing_controls_collapses_them_and_restores(qtbot: QtBot) -> None:
     assert viewer._controls.maximumHeight() == 0
     viewer.set_controls_suppressed(False)
     assert viewer._controls.maximumHeight() > 0
+
+
+def test_play_pause_is_a_global_mode_across_videos(qtbot: QtBot) -> None:
+    video = FIXTURES_DIR / "supported_video.webm"
+    viewer = MediaViewer()
+    qtbot.addWidget(viewer)
+
+    def is_playing() -> bool:
+        return viewer.video_player.playback_state == QMediaPlayer.PlaybackState.PlayingState
+
+    viewer.show_media(video)
+    assert viewer.autoplay is False
+    assert not is_playing()
+
+    viewer.toggle_playback()
+    viewer.show_media(FIXTURES_DIR / "audio_video.webm")
+    qtbot.waitUntil(is_playing, timeout=5000)
+
+    viewer.toggle_playback()
+    assert viewer.autoplay is False
+    viewer.show_media(video)
+    qtbot.wait(300)
+    assert not is_playing()

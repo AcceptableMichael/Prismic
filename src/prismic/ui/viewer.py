@@ -103,6 +103,10 @@ class MediaViewer(QWidget):
 
         self._current_path: Path | None = None
         self._controls_suppressed = False
+        # Play/pause is one global mode, not per-video: once any video is
+        # played, every video that follows starts playing, until one is
+        # paused. Off when the app opens.
+        self._autoplay = False
 
     def set_controls_suppressed(self, suppressed: bool) -> None:
         """Hide the video controls (focus and full-screen modes)."""
@@ -215,12 +219,16 @@ class MediaViewer(QWidget):
         self._image_view.clear()
         self._controls.setVisible(True)
         self._video_player.load(path)
+        if self._autoplay:
+            self._video_player.play()
         self._stack.setCurrentWidget(self._video_widget)
 
     def toggle_playback(self) -> None:
         if self._video_player.playback_state == QMediaPlayer.PlaybackState.PlayingState:
+            self._autoplay = False
             self._video_player.pause()
         else:
+            self._autoplay = True
             self._video_player.play()
 
     def _on_position_changed(self, position: int) -> None:
@@ -233,6 +241,10 @@ class MediaViewer(QWidget):
     def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
         is_playing = state == QMediaPlayer.PlaybackState.PlayingState
         self._play_pause_button.setText("Pause" if is_playing else "Play")
+
+    @property
+    def autoplay(self) -> bool:
+        return self._autoplay
 
     @property
     def play_pause_button(self) -> QPushButton:
