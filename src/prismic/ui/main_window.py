@@ -90,6 +90,8 @@ from prismic.ui.thumbnail_provider import ThumbnailProvider
 from prismic.ui.transient_message_bar import TransientMessageBar
 from prismic.ui.viewer import MediaViewer
 
+_VIEW_HISTORY_LIMIT = 1000
+
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -155,6 +157,12 @@ class MainWindow(QMainWindow):
         # maximized included -- rather than always landing on plain
         # windowed, which is what `showNormal()` alone would do.
         self._pre_fullscreen_state = Qt.WindowState.WindowNoState
+        # See `_record_view`/`_step_history`: every single file shown in the
+        # viewer, in order, and where in that list the viewer currently is.
+        # Ids, not result-set positions, so an entry stays reachable after
+        # the filter stops including it.
+        self._view_history: list[int] = []
+        self._view_history_index = -1
 
         self._build_ui()
         self._build_status_bar()
@@ -164,6 +172,8 @@ class MainWindow(QMainWindow):
             self._bindings,
             on_navigate_previous=lambda: self._navigate(-1),
             on_navigate_next=lambda: self._navigate(1),
+            on_history_back=lambda: self._step_history(-1),
+            on_history_forward=lambda: self._step_history(1),
             on_undo=self._undo,
             on_redo=self._redo,
             on_focus_item_tags=self.item_tag_panel.focus_search,
@@ -580,6 +590,8 @@ class MainWindow(QMainWindow):
             return
 
         self.session = session
+        self._view_history.clear()
+        self._view_history_index = -1
         self._instance_bridge = InstanceBridge(self)
         self._instance_bridge.raise_requested.connect(self._on_raise_requested)
         self._instance_bridge.take_ownership(session.collection.database_path)
@@ -858,8 +870,61 @@ class MainWindow(QMainWindow):
         if media is None:
             self.viewer.clear()
             return
+        self._record_view(current)
         self.viewer.show_media(self.session.collection.root / media.relative_path)
         self._preload_neighbors(current)
+
+    def _record_view(self, media_id: int) -> None:
+        """Append `media_id` to the view history unless it's what the viewer
+        is already on (a refresh re-showing the same file, or a history
+        step landing on its own entry). Viewing something new after
+        stepping back discards the forward entries, as in a browser."""
+        history = self._view_history
+        if 0 <= self._view_history_index < len(history) and (
+            history[self._view_history_index] == media_id
+        ):
+            return
+        del history[self._view_history_index + 1 :]
+        history.append(media_id)
+        if len(history) > _VIEW_HISTORY_LIMIT:
+            del history[0]
+        self._view_history_index = len(history) - 1
+
+    def _step_history(self, delta: int) -> None:
+        """Move through the view history, skipping entries whose file no
+        longer exists. The target is shown even if the active filter no
+        longer includes it -- that's the point of history -- in which case
+        it's current without being in the results list, until the next
+        recompute (any tag or filter change) repairs it the usual way."""
+        if self.session is None:
+            return
+        index = self._view_history_index + delta
+        while 0 <= index < len(self._view_history):
+            media_id = self._view_history[index]
+            if self.session.media.get(media_id) is not None:
+                break
+            index += delta
+        else:
+            return
+        self._view_history_index = index
+        self.session.state.current_item = media_id
+        self.session.state.selected_items = frozenset({media_id})
+        if media_id in self._display_order:
+            self._sync_result_selection()
+        else:
+            # Not in the list, so there's nothing to highlight: clear the
+            # view's selection with its signals off, since the change would
+            # otherwise round-trip into `_on_result_selection_changed` and
+            # reset the state just set.
+            selection_model = self.result_list.selectionModel()
+            blocked = selection_model.blockSignals(True)
+            try:
+                self.result_list.clearSelection()
+            finally:
+                selection_model.blockSignals(blocked)
+            self.result_list.viewport().update()
+        self._show_current_media()
+        self._refresh_item_tag_panel(self._ordered_tags())
 
     def _preload_neighbors(self, current: int) -> None:
         """Warm the decode cache for the items around `current`, so

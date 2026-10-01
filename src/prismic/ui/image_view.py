@@ -7,7 +7,7 @@ Panning and smooth scaling are QGraphicsView's own built-in behavior
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QMouseEvent, QPixmap, QWheelEvent
+from PySide6.QtGui import QImage, QMouseEvent, QMovie, QPixmap, QWheelEvent
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QWidget
 
 _ZOOM_STEP_IN = 1.25
@@ -23,6 +23,7 @@ class ImageView(QGraphicsView):
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._zoom = 1.0
         self._fitted = True
+        self._movie: QMovie | None = None
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
@@ -32,7 +33,31 @@ class ImageView(QGraphicsView):
         # viewport's width.
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
+    def set_movie(self, movie: QMovie) -> None:
+        """Show an animation, frame by frame, through the same pixmap item a
+        still uses -- so zoom, pan and fit-to-window behave identically."""
+        self.set_image(movie.currentImage())
+        self._movie = movie
+        movie.setParent(self)
+        movie.frameChanged.connect(self._on_movie_frame)
+        movie.start()
+
+    def _on_movie_frame(self) -> None:
+        if self._movie is not None and self._pixmap_item is not None:
+            self._pixmap_item.setPixmap(self._movie.currentPixmap())
+
+    def stop_movie(self) -> None:
+        if self._movie is not None:
+            self._movie.stop()
+            self._movie.deleteLater()
+            self._movie = None
+
+    @property
+    def is_animating(self) -> bool:
+        return self._movie is not None
+
     def set_image(self, image: QImage) -> None:
+        self.stop_movie()
         self._scene.clear()
         pixmap = QPixmap.fromImage(image)
         self._pixmap_item = self._scene.addPixmap(pixmap)
@@ -43,6 +68,7 @@ class ImageView(QGraphicsView):
         self.fit_to_window()
 
     def clear(self) -> None:
+        self.stop_movie()
         self._scene.clear()
         self._pixmap_item = None
 

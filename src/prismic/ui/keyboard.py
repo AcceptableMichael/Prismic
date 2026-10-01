@@ -181,6 +181,8 @@ class KeyboardController(QObject):
         *,
         on_navigate_previous: Callable[[], None],
         on_navigate_next: Callable[[], None],
+        on_history_back: Callable[[], None],
+        on_history_forward: Callable[[], None],
         on_undo: Callable[[], None],
         on_redo: Callable[[], None],
         on_focus_item_tags: Callable[[], None],
@@ -200,6 +202,8 @@ class KeyboardController(QObject):
             shortcuts.NAVIGATE_NEXT: on_navigate_next,
             shortcuts.NAVIGATE_PREVIOUS_WHILE_TYPING: on_navigate_previous,
             shortcuts.NAVIGATE_NEXT_WHILE_TYPING: on_navigate_next,
+            shortcuts.HISTORY_BACK: on_history_back,
+            shortcuts.HISTORY_FORWARD: on_history_forward,
             shortcuts.FOCUS_TAG_SEARCH: on_focus_item_tags,
             shortcuts.FOCUS_MODE: on_toggle_focus_mode,
             # Registered here even though its default is a modifier tap,
@@ -258,6 +262,10 @@ class KeyboardController(QObject):
             for shortcut_id in (
                 shortcuts.NAVIGATE_PREVIOUS_WHILE_TYPING,
                 shortcuts.NAVIGATE_NEXT_WHILE_TYPING,
+                # Ctrl+Left/Right mean "word left/right" in a text box, but
+                # history navigation is documented as working everywhere.
+                shortcuts.HISTORY_BACK,
+                shortcuts.HISTORY_FORWARD,
             ):
                 if self._bindings.binding(shortcut_id) == pressed:
                     self._commands[shortcut_id]()

@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QImageReader, QKeySequence, QMovie
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -30,6 +30,8 @@ from prismic.media.loader import ImageLoader, ImageLoadResult
 from prismic.media.video import VideoPlayer
 from prismic.ui.future_watcher import FutureWatcher
 from prismic.ui.image_view import ImageView
+
+_ANIMATED_EXTENSIONS = frozenset({".gif"})
 
 
 class MediaViewer(QWidget):
@@ -124,6 +126,11 @@ class MediaViewer(QWidget):
     def _show_image(self, path: Path) -> None:
         self._video_player.stop()
         self._controls.setVisible(False)
+        if self._try_show_animation(path):
+            return
+        # Whatever was animating belongs to the previous file; the still
+        # that replaces it arrives asynchronously below.
+        self._image_view.stop_movie()
         pool = self._worker_pool()
         if pool is None:
             # No pool available (e.g. a standalone MediaViewer with no
@@ -143,6 +150,27 @@ class MediaViewer(QWidget):
         watcher = FutureWatcher(future, self)
         self._watchers.append(watcher)
         watcher.finished.connect(lambda result: self._on_image_loaded(watcher, result))
+
+    def _try_show_animation(self, path: Path) -> bool:
+        """Play `path` as an animation if it is one (a multi-frame GIF).
+
+        Done on the GUI thread, bypassing the decode cache: `QMovie` decodes
+        frame by frame as it plays, which is the point -- a cached
+        single `QImage` can only ever be the first frame."""
+        if path.suffix.lower() not in _ANIMATED_EXTENSIONS:
+            return False
+        reader = QImageReader(str(path))
+        if not reader.supportsAnimation() or reader.imageCount() < 2:
+            return False
+        movie = QMovie(str(path))
+        if not movie.isValid():
+            return False
+        # Invalidates any in-flight still decode, so it can't land on top.
+        self._current_request_id = self._image_loader.begin_request()
+        movie.jumpToFrame(0)
+        self._image_view.set_movie(movie)
+        self._stack.setCurrentWidget(self._image_view)
+        return True
 
     def _on_image_loaded(self, watcher: FutureWatcher, result: ImageLoadResult | None) -> None:
         if watcher in self._watchers:

@@ -1023,3 +1023,61 @@ def test_bindings_persist_across_windows(qtbot: QtBot) -> None:
 
     assert second.bindings.binding(shortcuts.OPEN_SETTINGS) == "F5"
     assert second._shortcut_actions[shortcuts.OPEN_SETTINGS].shortcut() == QKeySequence("F5")
+
+
+def test_ctrl_left_and_right_step_back_and_forward_through_view_history(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    first_id, second_id = session.state.result_set
+    session.state.current_item = first_id
+    window._sync_result_selection()
+    window._show_current_media()
+    qtbot.keyClick(window, Qt.Key.Key_Right)
+    assert session.state.current_item == second_id
+
+    qtbot.keyClick(window, Qt.Key.Key_Left, Qt.KeyboardModifier.ControlModifier)
+    assert session.state.current_item == first_id
+
+    qtbot.keyClick(window, Qt.Key.Key_Right, Qt.KeyboardModifier.ControlModifier)
+    assert session.state.current_item == second_id
+
+
+def test_view_history_reaches_a_file_the_results_no_longer_include(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    first_id, second_id = session.state.result_set
+    session.state.current_item = first_id
+    window._sync_result_selection()
+    window._show_current_media()
+    qtbot.keyClick(window, Qt.Key.Key_Right)
+    # As if a filter had since dropped the first file from the list.
+    window._display_order = [second_id]
+
+    qtbot.keyClick(window, Qt.Key.Key_Left, Qt.KeyboardModifier.ControlModifier)
+
+    assert session.state.current_item == first_id
+    first = session.media.get(first_id)
+    assert first is not None
+    assert window.viewer.current_path is not None
+    assert window.viewer.current_path.name == Path(first.relative_path).name
+
+
+def test_view_history_shortcuts_work_while_a_tag_search_box_has_focus(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    session = window.session
+    assert session is not None
+    first_id, second_id = session.state.result_set
+    session.state.current_item = first_id
+    window._sync_result_selection()
+    window._show_current_media()
+    qtbot.keyClick(window, Qt.Key.Key_Right)
+    window.item_tag_panel.focus_search()
+
+    qtbot.keyClick(window, Qt.Key.Key_Left, Qt.KeyboardModifier.ControlModifier)
+
+    assert session.state.current_item == first_id

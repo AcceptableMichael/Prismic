@@ -121,6 +121,8 @@ NAVIGATE_PREVIOUS = "navigate.previous"
 NAVIGATE_NEXT = "navigate.next"
 NAVIGATE_PREVIOUS_WHILE_TYPING = "navigate.previous_while_typing"
 NAVIGATE_NEXT_WHILE_TYPING = "navigate.next_while_typing"
+HISTORY_BACK = "navigate.history_back"
+HISTORY_FORWARD = "navigate.history_forward"
 
 FOCUS_TAG_SEARCH = "tagging.focus_search"
 DISMISS = "tagging.dismiss"
@@ -251,6 +253,26 @@ SHORTCUTS: tuple[ShortcutDefinition, ...] = (
         label="Next file (works while typing)",
         description="Move to the next file even while a tag search box has focus",
         default="Down",
+    ),
+    ShortcutDefinition(
+        id=HISTORY_BACK,
+        category="Navigation",
+        label="Back in view history",
+        description=(
+            "Return to the file viewed before this one, even if the current filter "
+            "no longer includes it. Works while typing"
+        ),
+        default="Ctrl+Left",
+    ),
+    ShortcutDefinition(
+        id=HISTORY_FORWARD,
+        category="Navigation",
+        label="Forward in view history",
+        description=(
+            "Undo a Back: go to the file viewed after this one, even if the current "
+            "filter no longer includes it. Works while typing"
+        ),
+        default="Ctrl+Right",
     ),
     ShortcutDefinition(
         id=FOCUS_TAG_SEARCH,
