@@ -21,6 +21,7 @@ from __future__ import annotations
 import queue
 import sqlite3
 import threading
+import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -54,6 +55,35 @@ __all__ = [
 # `.scan` specifically -- to simulate a file disappearing between the scan
 # and the hash, and to prove hashing starts before the walk finishes,
 # respectively.
+
+
+# A file modified this recently is always re-hashed rather than trusted on
+# its size/mtime: a filesystem's timestamp granularity (2s on FAT) means a
+# second edit can land on an unchanged mtime, and "recently modified" is the
+# only window in which that can happen.
+_RECENT_MTIME_WINDOW_SECONDS = 2.0
+
+
+def _recorded_hash_if_unchanged(
+    scanned_file: ScannedFile, recorded: Media | None, now: float
+) -> str | None:
+    """The stored content hash for `scanned_file`, if its size/mtime prove it unchanged.
+
+    Returns None whenever there's any doubt, meaning "read and hash it" -- the
+    safe direction. A match is trusted only when size and mtime both equal what
+    was recorded, the mtime isn't recent (see `_RECENT_MTIME_WINDOW_SECONDS`),
+    and the mtime has a sub-second part: a whole-second mtime is what FAT and
+    second-truncating tools produce, where equal mtimes prove little.
+    """
+    if recorded is None or recorded.state != MediaState.ACTIVE:
+        return None
+    if recorded.size != scanned_file.size or recorded.mtime != scanned_file.mtime:
+        return None
+    if scanned_file.mtime.is_integer():
+        return None
+    if scanned_file.mtime > now - _RECENT_MTIME_WINDOW_SECONDS:
+        return None
+    return recorded.content_hash
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +303,12 @@ def run_reconciliation(
     (via `ScanStatsRepository`) once this scan itself finishes walking, for
     the *next* call to use.
 
+    A file whose size and mtime match its active record from the last scan
+    isn't read at all: its stored hash is reused (see
+    `_recorded_hash_if_unchanged` for when that's trusted and when it isn't),
+    so a rescan of an unchanged collection costs one directory walk, not a
+    read of every byte. Anything doubtful is hashed as before.
+
     Hashing itself -- the slow part on a large root, since it means reading
     every candidate file's full contents -- runs on a pool of threads
     rather than one file at a time: each `hash_file` call is independent
@@ -302,6 +338,12 @@ def run_reconciliation(
     """
     stats_repository = ScanStatsRepository(connection)
     expected_total = stats_repository.get_last_file_count()
+    recorded_by_path = {
+        m.relative_path: m
+        for m in MediaRepository(connection).list_all()
+        if m.state == MediaState.ACTIVE
+    }
+    scan_started_at = time.time()
 
     hashed_files: list[HashedFile] = []
     unreadable_paths: set[str] = set()
@@ -317,11 +359,10 @@ def run_reconciliation(
     def _on_done(scanned_file: ScannedFile, future: Future[str]) -> None:
         completed.put((scanned_file, future))
 
-    def _apply(scanned_file: ScannedFile, future: Future[str]) -> None:
+    def _record(scanned_file: ScannedFile, content_hash: str | None) -> None:
+        """Count one file as processed; `None` means it couldn't be read."""
         nonlocal processed
-        try:
-            content_hash = future.result()
-        except OSError:
+        if content_hash is None:
             unreadable_paths.add(scanned_file.relative_path)
         else:
             hashed_files.append(
@@ -336,6 +377,14 @@ def run_reconciliation(
         if on_progress is not None:
             on_progress(processed, expected_total)
 
+    def _apply(scanned_file: ScannedFile, future: Future[str]) -> None:
+        try:
+            content_hash = future.result()
+        except OSError:
+            _record(scanned_file, None)
+        else:
+            _record(scanned_file, content_hash)
+
     def _drain_ready() -> None:
         """Apply every hash that's already finished, without blocking."""
         while True:
@@ -347,9 +396,19 @@ def run_reconciliation(
 
     with ThreadPoolExecutor(thread_name_prefix="prismic-hash") as executor:
         for scanned_file in scan(collection):
-            future = executor.submit(hash_file, scanned_file.absolute_path)
-            future.add_done_callback(partial(_on_done, scanned_file))
-            submitted += 1
+            known_hash = _recorded_hash_if_unchanged(
+                scanned_file, recorded_by_path.get(scanned_file.relative_path), scan_started_at
+            )
+            if known_hash is not None:
+                # Size and mtime match the last scan: reuse the stored hash
+                # instead of reading the file. Counted on both sides so the
+                # drain loop below still ends when every submission is applied.
+                submitted += 1
+                _record(scanned_file, known_hash)
+            else:
+                future = executor.submit(hash_file, scanned_file.absolute_path)
+                future.add_done_callback(partial(_on_done, scanned_file))
+                submitted += 1
             _drain_ready()
         while processed < submitted:
             _apply(*completed.get())

@@ -362,3 +362,133 @@ def test_reconciliation_can_run_on_a_separate_connection_to_the_same_file(
     assert len(media) == 1
     assert media[0].relative_path == "a.jpg"
     main_connection.close()
+
+
+# --- size/mtime shortcut: unchanged files aren't re-read -------------------
+
+_OLD_MTIME = 1_600_000_000.25  # settled (not recent) and has a sub-second part
+
+
+def _write_settled(path: Path, content: bytes, mtime: float = _OLD_MTIME) -> None:
+    import os
+
+    path.write_bytes(content)
+    os.utime(path, ns=(int(mtime * 1e9), int(mtime * 1e9)))
+
+
+def _count_hash_calls(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    import prismic.indexing.reconciler as reconciler_module
+
+    calls: list[object] = []
+    real_hash_file = reconciler_module.hash_file
+
+    def _counting(path: Path) -> str:
+        calls.append(path)
+        return real_hash_file(path)
+
+    monkeypatch.setattr(reconciler_module, "hash_file", _counting)
+    return calls
+
+
+def test_unchanged_settled_file_is_not_rehashed(
+    collection: Collection,
+    reconciler: Reconciler,
+    media_repository: MediaRepository,
+    migrated_connection: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_settled(collection.root / "a.jpg", b"content")
+    _run(reconciler, collection, migrated_connection)
+    first = media_repository.list_all()
+    calls = _count_hash_calls(monkeypatch)
+
+    _run(reconciler, collection, migrated_connection)
+
+    assert calls == []
+    assert media_repository.list_all() == first
+
+
+def test_changed_size_is_rehashed_and_detected(
+    collection: Collection,
+    reconciler: Reconciler,
+    media_repository: MediaRepository,
+    migrated_connection: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = collection.root / "a.jpg"
+    _write_settled(target, b"content")
+    _run(reconciler, collection, migrated_connection)
+    calls = _count_hash_calls(monkeypatch)
+
+    _write_settled(target, b"longer content")  # same mtime, different size
+    _run(reconciler, collection, migrated_connection)
+
+    assert len(calls) == 1
+    assert [m.state for m in media_repository.list_all()] == [MediaState.MISSING, MediaState.ACTIVE]
+
+
+def test_changed_mtime_is_rehashed(
+    collection: Collection,
+    reconciler: Reconciler,
+    migrated_connection: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = collection.root / "a.jpg"
+    _write_settled(target, b"content")
+    _run(reconciler, collection, migrated_connection)
+    calls = _count_hash_calls(monkeypatch)
+
+    _write_settled(target, b"CONTENT", mtime=_OLD_MTIME + 5)  # same size, newer mtime
+    _run(reconciler, collection, migrated_connection)
+
+    assert len(calls) == 1
+
+
+def test_recently_modified_file_is_always_rehashed(
+    collection: Collection,
+    reconciler: Reconciler,
+    migrated_connection: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (collection.root / "a.jpg").write_bytes(b"content")  # mtime is "now"
+    _run(reconciler, collection, migrated_connection)
+    calls = _count_hash_calls(monkeypatch)
+
+    _run(reconciler, collection, migrated_connection)
+
+    assert len(calls) == 1
+
+
+def test_whole_second_mtime_is_always_rehashed(
+    collection: Collection,
+    reconciler: Reconciler,
+    migrated_connection: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FAT-style timestamps: equal whole-second mtimes prove too little."""
+    _write_settled(collection.root / "a.jpg", b"content", mtime=1_600_000_000.0)
+    _run(reconciler, collection, migrated_connection)
+    calls = _count_hash_calls(monkeypatch)
+
+    _run(reconciler, collection, migrated_connection)
+
+    assert len(calls) == 1
+
+
+def test_move_is_still_detected_when_other_files_are_skipped(
+    collection: Collection,
+    reconciler: Reconciler,
+    media_repository: MediaRepository,
+    migrated_connection: sqlite3.Connection,
+) -> None:
+    _write_settled(collection.root / "stay.jpg", b"stays")
+    _write_settled(collection.root / "move.jpg", b"moves")
+    _run(reconciler, collection, migrated_connection)
+    original_ids = {m.relative_path: m.id for m in media_repository.list_all()}
+
+    (collection.root / "move.jpg").rename(collection.root / "moved.jpg")
+    _run(reconciler, collection, migrated_connection)
+
+    by_path = {m.relative_path: m for m in media_repository.list_all()}
+    assert by_path["moved.jpg"].id == original_ids["move.jpg"]
+    assert by_path["stay.jpg"].id == original_ids["stay.jpg"]

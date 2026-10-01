@@ -41,13 +41,16 @@ def scan(collection: Collection) -> Iterator[ScannedFile]:
     Hard-link relationships are not modeled: each path is treated as an
     independent candidate regardless of inode sharing.
     """
-    for absolute_path in _walk(collection.root):
+    for entry in _walk(collection.root):
+        absolute_path = Path(entry.path)
         if collection.is_collection_file(absolute_path):
             continue
         if not is_supported_extension(absolute_path):
             continue
         try:
-            stat_result = absolute_path.stat()
+            # Cached from the directory listing on Windows, so no extra
+            # syscall per file; one `stat` on POSIX, same as before.
+            stat_result = entry.stat(follow_symlinks=False)
         except OSError:
             continue
         relative_path = absolute_path.relative_to(collection.root).as_posix()
@@ -59,35 +62,35 @@ def scan(collection: Collection) -> Iterator[ScannedFile]:
         )
 
 
-def _walk(directory: Path) -> Iterator[Path]:
+def _walk(directory: Path) -> Iterator[os.DirEntry[str]]:
     try:
         entries = list(os.scandir(directory))
     except OSError:
         return
     for entry in entries:
-        entry_path = Path(entry.path)
         try:
-            if _is_reparse_point(entry_path):
+            if _is_reparse_point(entry):
                 continue
             if entry.is_dir(follow_symlinks=False):
-                yield from _walk(entry_path)
+                yield from _walk(Path(entry.path))
             elif entry.is_file(follow_symlinks=False):
-                yield entry_path
+                yield entry
         except OSError:
             continue
 
 
-def _is_reparse_point(path: Path) -> bool:
+def _is_reparse_point(entry: os.DirEntry[str]) -> bool:
     """True for symlinks (all platforms) and Windows junctions/reparse points.
 
-    NTFS junctions aren't POSIX symlinks and `Path.is_symlink()` doesn't
-    detect them, so Windows needs its own check via the file attributes
-    reported alongside `lstat()`.
+    NTFS junctions aren't POSIX symlinks and `is_symlink()` doesn't detect
+    them, so Windows needs its own check via the file attributes. Those come
+    from the same cached directory-listing data `DirEntry` already holds, so
+    unlike a separate `lstat()` per entry this costs no extra syscall.
     """
     if sys.platform == "win32":
         try:
-            attributes = path.lstat().st_file_attributes
+            attributes = entry.stat(follow_symlinks=False).st_file_attributes
         except OSError:
             return False
         return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
-    return path.is_symlink()
+    return entry.is_symlink()
