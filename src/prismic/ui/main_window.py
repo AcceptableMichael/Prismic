@@ -1198,9 +1198,9 @@ class MainWindow(QMainWindow):
     def _apply_focus_mode(self, checked: bool) -> None:
         """Hide (or restore) every panel except the media viewer itself.
 
-        The viewer widget is left alone -- including its own video
-        play/pause controls, which stay wherever they'd normally be. This
-        only hides the browsing/tagging chrome around it: the tag panels
+        The viewer widget is left alone, apart from its video controls
+        (see `_update_viewer_controls`). This otherwise only hides the
+        browsing/tagging chrome around it: the tag panels
         and their shuffle/full-screen toolbar (`_left_column` wraps both,
         so hiding it gets the toolbar for free), the result list, and the
         menu/status bars.
@@ -1210,6 +1210,13 @@ class MainWindow(QMainWindow):
         self.result_list.setVisible(visible)
         self.menuBar().setVisible(visible)
         self.statusBar().setVisible(visible)
+        self._update_viewer_controls()
+
+    def _update_viewer_controls(self) -> None:
+        """Video controls are chrome too: hidden in focus mode and full screen."""
+        self.viewer.set_controls_suppressed(
+            self._focus_mode_action.isChecked() or self.panel_toolbar.fullscreen_button.isChecked()
+        )
 
     def _apply_shuffle_mode(self, checked: bool) -> None:
         """Toggle the shuffle button in `panel_toolbar`.
@@ -1246,6 +1253,7 @@ class MainWindow(QMainWindow):
         it -- not what "restore ... to the size it was before" means
         when "before" was maximized.
         """
+        self._update_viewer_controls()
         if checked:
             self._pre_fullscreen_state = self.windowState()
             self.showFullScreen()

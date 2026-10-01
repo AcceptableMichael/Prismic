@@ -32,6 +32,7 @@ from prismic.ui.future_watcher import FutureWatcher
 from prismic.ui.image_view import ImageView
 
 _ANIMATED_EXTENSIONS = frozenset({".gif"})
+_QWIDGETSIZE_MAX = 16777215
 
 
 class MediaViewer(QWidget):
@@ -57,6 +58,9 @@ class MediaViewer(QWidget):
         self._video_widget = QVideoWidget()
         self._video_player = VideoPlayer(self)
         self._video_player.qt_player.setVideoOutput(self._video_widget)
+        # Looped here rather than in `VideoPlayer`: it's how the viewer
+        # wants clips shown, not a property of playback itself.
+        self._video_player.qt_player.setLoops(QMediaPlayer.Loops.Infinite)
         self._video_player.load_failed.connect(self.load_error)
         self._video_player.qt_player.positionChanged.connect(self._on_position_changed)
         self._video_player.qt_player.durationChanged.connect(self._on_duration_changed)
@@ -98,6 +102,14 @@ class MediaViewer(QWidget):
         layout.addWidget(self._controls)
 
         self._current_path: Path | None = None
+        self._controls_suppressed = False
+
+    def set_controls_suppressed(self, suppressed: bool) -> None:
+        """Hide the video controls (focus and full-screen modes)."""
+        self._controls_suppressed = suppressed
+        # Collapsed to nothing rather than hidden: a hidden widget's
+        # shortcuts are disabled, and Space must keep playing/pausing.
+        self._controls.setMaximumHeight(0 if suppressed else _QWIDGETSIZE_MAX)
 
     def set_play_pause_shortcut(self, binding: str) -> None:
         """Rebind the play/pause button's own key, in Qt's portable key-

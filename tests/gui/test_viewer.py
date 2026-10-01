@@ -107,3 +107,22 @@ def test_single_frame_gif_is_not_treated_as_an_animation(qtbot: QtBot, tmp_path:
     viewer.show_media(gif)
 
     assert viewer.image_view.is_animating is False
+
+
+def test_video_loops_forever(qtbot: QtBot) -> None:
+    viewer = MediaViewer()
+    qtbot.addWidget(viewer)
+
+    assert viewer.video_player.qt_player.loops() == QMediaPlayer.Loops.Infinite
+
+
+def test_suppressing_controls_collapses_them_and_restores(qtbot: QtBot) -> None:
+    viewer = MediaViewer()
+    qtbot.addWidget(viewer)
+    viewer.show()
+    viewer.show_media(FIXTURES_DIR / "supported_video.webm")
+
+    viewer.set_controls_suppressed(True)
+    assert viewer._controls.maximumHeight() == 0
+    viewer.set_controls_suppressed(False)
+    assert viewer._controls.maximumHeight() > 0
